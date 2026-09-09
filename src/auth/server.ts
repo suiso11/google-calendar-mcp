@@ -62,7 +62,7 @@ export class AuthServer {
     }
     return client.generateAuthUrl({
       access_type: 'offline',
-      scope: ['https://www.googleapis.com/auth/calendar'],
+      scope: ['https://www.googleapis.com/auth/calendar.events.readonly'],
       prompt: 'consent',
       code_challenge_method: CodeChallengeMethod.S256,
       code_challenge: this.pendingAuthFlow.codeChallenge,
