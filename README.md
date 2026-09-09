@@ -247,7 +247,7 @@ You can limit which tools are exposed to the AI assistant using the `--enable-to
 
 **Via command line:**
 ```bash
-npx @cocal/google-calendar-mcp start --enable-tools list-events,create-event,get-current-time
+npx @cocal/google-calendar-mcp start --enable-tools list-calendars,list-events,search-events,get-event
 ```
 
 **Via environment variable in Claude Desktop config:**
@@ -259,16 +259,14 @@ npx @cocal/google-calendar-mcp start --enable-tools list-events,create-event,get
       "args": ["@cocal/google-calendar-mcp"],
       "env": {
         "GOOGLE_OAUTH_CREDENTIALS": "/path/to/credentials.json",
-        "ENABLED_TOOLS": "list-events,create-event,get-current-time,update-event"
+        "ENABLED_TOOLS": "list-calendars,list-events,search-events,get-event"
       }
     }
   }
 }
 ```
 
-**Available tool names:** `list-calendars`, `list-events`, `search-events`, `get-event`, `list-colors`, `create-event`, `update-event`, `delete-event`, `get-freebusy`, `get-current-time`, `respond-to-event`, `manage-accounts`
-
-**Note:** The `manage-accounts` tool is always available regardless of filtering, as it's needed for authentication management.
+**Available tool names:** `list-calendars`, `list-events`, `search-events`, `get-event`
 
 When tool filtering is active, the server provides instructions to the AI assistant listing which tools are disabled. This allows the AI to inform users that additional functionality exists but is currently unavailable, without consuming the full token cost of those tool schemas.
 
