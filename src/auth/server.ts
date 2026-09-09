@@ -5,6 +5,7 @@ import http from 'http';
 import { URL } from 'url';
 import open from 'open';
 import { loadCredentials } from './client.js';
+import { READONLY_CALENDAR_SCOPES } from './scopes.js';
 import { getAccountMode } from './utils.js';
 import { renderAuthSuccess, renderAuthError, renderAuthLanding, loadWebFile } from '../web/templates.js';
 
@@ -62,7 +63,7 @@ export class AuthServer {
     }
     return client.generateAuthUrl({
       access_type: 'offline',
-      scope: ['https://www.googleapis.com/auth/calendar.events.readonly'],
+      scope: [...READONLY_CALENDAR_SCOPES],
       prompt: 'consent',
       code_challenge_method: CodeChallengeMethod.S256,
       code_challenge: this.pendingAuthFlow.codeChallenge,
