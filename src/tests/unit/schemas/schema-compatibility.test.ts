@@ -120,7 +120,7 @@ describe('Provider-Specific Schema Compatibility', () => {
       }
     });
 
-    it('should convert list-events calendarId anyOf to string for OpenAI', () => {
+    it('should expose list-events calendarId as single string for OpenAI', () => {
       const tools = ToolRegistry.getToolsWithSchemas();
       const listEventsTool = tools.find(t => t.name === 'list-events');
 
@@ -129,13 +129,9 @@ describe('Provider-Specific Schema Compatibility', () => {
       // Convert to OpenAI format
       const openaiSchema = convertMCPSchemaToOpenAI(listEventsTool!.inputSchema);
 
-      // OpenAI should see a simple string type, not anyOf
+      // OpenAI should see a simple string type, not anyOf (single-calendar pagination)
       expect(openaiSchema.properties.calendarId.type).toBe('string');
       expect(openaiSchema.properties.calendarId.anyOf).toBeUndefined();
-
-      // Description should mention JSON array format
-      expect(openaiSchema.properties.calendarId.description).toContain('JSON array string format');
-      expect(openaiSchema.properties.calendarId.description).toMatch(/\[".*"\]/);
     });
 
     it('should convert search-events calendarId anyOf to string for OpenAI', () => {
@@ -170,25 +166,19 @@ describe('Provider-Specific Schema Compatibility', () => {
   });
 
   describe('Python MCP Client Compatibility', () => {
-    it('should ensure list-events supports native arrays via anyOf', () => {
+    it('should expose list-events calendarId as single string (no native arrays)', () => {
       const tools = ToolRegistry.getToolsWithSchemas();
       const listEventsTool = tools.find(t => t.name === 'list-events');
 
       expect(listEventsTool).toBeDefined();
 
-      // Raw MCP schema should have anyOf for Python clients
+      // Raw MCP schema is a single string for single-calendar pagination
       const schema = listEventsTool!.inputSchema as JSONSchemaObject;
       expect(schema.properties).toBeDefined();
 
       const calendarIdProp = schema.properties!.calendarId;
-      expect(calendarIdProp.anyOf).toBeDefined();
-      expect(Array.isArray(calendarIdProp.anyOf)).toBe(true);
-      expect(calendarIdProp.anyOf.length).toBe(2);
-
-      // Verify it has both string and array options
-      const types = calendarIdProp.anyOf.map((t: any) => t.type);
-      expect(types).toContain('string');
-      expect(types).toContain('array');
+      expect(calendarIdProp.anyOf).toBeUndefined();
+      expect(calendarIdProp.type).toBe('string');
     });
 
     it('should ensure all other tools do NOT use anyOf/oneOf/allOf (except for account parameter)', () => {
@@ -197,7 +187,7 @@ describe('Provider-Specific Schema Compatibility', () => {
       const issues: string[] = [];
 
       // Tools explicitly allowed to use anyOf for calendarId (multi-calendar support)
-      const multiCalendarTools = ['list-events', 'search-events'];
+      const multiCalendarTools = ['search-events'];
 
       for (const tool of tools) {
         // Skip multi-calendar tools - they're explicitly allowed to use anyOf for calendarId
@@ -352,8 +342,8 @@ describe('Schema Validation Rules Documentation', () => {
   it('should document provider-specific compatibility requirements', () => {
     const rules = {
       'OpenAI': 'Schemas are converted to remove anyOf/oneOf/allOf. Union types flattened to primary type with usage notes in description.',
-      'Python MCP': 'Native array support via anyOf for list-events.calendarId. Accepts both string and array types directly.',
-      'Claude/Generic MCP': 'Uses raw schemas. list-events has anyOf for flexibility, but most tools avoid union types for broad compatibility.',
+      'Python MCP': 'Single-calendar list-events uses a plain string calendarId; search-events retains anyOf for native arrays.',
+      'Claude/Generic MCP': 'Uses raw schemas. search-events has anyOf for flexibility; list-events is single-calendar string for paginated reads.',
       'Top-level schema': 'All schemas must be type: "object" at root level.',
       'DateTime fields': 'Support both RFC3339 with timezone and timezone-naive formats.',
       'Array fields': 'Must have items schema defined for proper validation.',

@@ -228,6 +228,7 @@ export interface DuplicateInfo {
 export interface ListEventsResponse {
   events: StructuredEvent[];
   totalCount: number;
+  nextPageToken?: string;
   calendars?: string[];
   accounts?: string[];
   note?: string;

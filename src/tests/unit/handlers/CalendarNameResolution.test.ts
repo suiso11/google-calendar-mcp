@@ -162,90 +162,37 @@ describe('Calendar Name Resolution', () => {
     });
   });
 
-  describe('multiple calendar name resolution', () => {
-    it('should resolve multiple calendar names including summaryOverride', async () => {
+  describe('single-calendar name resolution (paginated list-events)', () => {
+    it('should reject array calendarId (single calendar only)', async () => {
       const args = {
-        calendarId: ['Work Calendar', 'Personal Calendar'],  // Pass as array, not JSON string
+        calendarId: ['Work Calendar', 'Personal Calendar'],
         timeMin: '2025-06-02T00:00:00Z',
         timeMax: '2025-06-09T23:59:59Z'
-      };
+      } as any;
 
-      // Mock fetch for batch requests
-      global.fetch = vi.fn().mockResolvedValue({
-        ok: true,
-        status: 200,
-        headers: {
-          get: vi.fn()
-        },
-        text: () => Promise.resolve(`--batch_boundary
-Content-Type: application/http
-Content-ID: <item1>
-
-HTTP/1.1 200 OK
-Content-Type: application/json
-
-{"items": []}
-
---batch_boundary
-Content-Type: application/http
-Content-ID: <item2>
-
-HTTP/1.1 200 OK
-Content-Type: application/json
-
-{"items": []}
-
---batch_boundary--`)
-      });
-
-      await handler.runTool(args, mockAccounts);
-
-      // Should have called fetch with both resolved calendar IDs
-      expect(global.fetch).toHaveBeenCalled();
-      const fetchCall = vi.mocked(global.fetch).mock.calls[0];
-      const requestBody = fetchCall[1]?.body as string;
-
-      // Calendar IDs may be URL-encoded in batch request
-      expect(requestBody).toMatch(/work@example\.com|work%40example\.com/);
-      expect(requestBody).toMatch(/personal@example\.com|personal%40example\.com/);
+      await expect(handler.runTool(args, mockAccounts)).rejects.toThrow(
+        /exactly one.*calendarId/i
+      );
     });
 
-    it('should resolve mix of IDs, summary names, and summaryOverride names', async () => {
+    it('should resolve a single mixed ID/name via single events.list call', async () => {
       const args = {
-        calendarId: ['primary', 'Work Calendar', 'Personal Calendar'],  // Pass as array
+        calendarId: 'Work Calendar',
         timeMin: '2025-06-02T00:00:00Z',
         timeMax: '2025-06-09T23:59:59Z'
       };
 
-      global.fetch = vi.fn().mockResolvedValue({
-        ok: true,
-        status: 200,
-        headers: {
-          get: vi.fn()
-        },
-        text: () => Promise.resolve(`--batch_boundary
-Content-Type: application/http
-
-HTTP/1.1 200 OK
-
-{"items": []}
---batch_boundary--`)
-      });
-
       await handler.runTool(args, mockAccounts);
 
-      const fetchCall = vi.mocked(global.fetch).mock.calls[0];
-      const requestBody = fetchCall[1]?.body as string;
-
-      // Should include all three calendar IDs (may be URL-encoded)
-      expect(requestBody).toContain('primary');
-      expect(requestBody).toMatch(/work@example\.com|work%40example\.com/);
-      expect(requestBody).toMatch(/personal@example\.com|personal%40example\.com/);
+      expect(mockCalendar.events.list).toHaveBeenCalledTimes(1);
+      expect(mockCalendar.events.list).toHaveBeenCalledWith(
+        expect.objectContaining({ calendarId: 'work@example.com' })
+      );
     });
   });
 
   describe('error handling with summaryOverride', () => {
-    it('should provide helpful error listing both summaryOverride and summary', async () => {
+    it('should provide helpful error for unknown single calendar', async () => {
       const args = {
         calendarId: 'NonExistentCalendar',
         timeMin: '2025-06-02T00:00:00Z',
@@ -253,7 +200,7 @@ HTTP/1.1 200 OK
       };
 
       await expect(handler.runTool(args, mockAccounts)).rejects.toThrow(
-        /Calendar\(s\) not found: "NonExistentCalendar"/
+        /Calendar "NonExistentCalendar" not found/
       );
 
       try {
@@ -299,9 +246,9 @@ HTTP/1.1 200 OK
   });
 
   describe('performance optimization', () => {
-    it('should skip API call when all inputs are IDs', async () => {
+    it('should skip calendarList.list when input is already an ID', async () => {
       const args = {
-        calendarId: ['primary', 'work@example.com'],  // Pass as array
+        calendarId: 'primary',
         timeMin: '2025-06-02T00:00:00Z',
         timeMax: '2025-06-09T23:59:59Z'
       };
@@ -309,94 +256,53 @@ HTTP/1.1 200 OK
       // Reset the mock to track calls
       mockCalendar.calendarList.list.mockClear();
 
-      global.fetch = vi.fn().mockResolvedValue({
-        ok: true,
-        status: 200,
-        headers: {
-          get: vi.fn()
-        },
-        text: () => Promise.resolve(`--batch_boundary
-Content-Type: application/http
-
-HTTP/1.1 200 OK
-
-{"items": []}
---batch_boundary--`)
-      });
-
       await handler.runTool(args, mockAccounts);
 
-      // Should NOT have called calendarList.list since all inputs are IDs
-      expect(mockCalendar.calendarList.list).not.toHaveBeenCalled();
+      // resolveCalendarId short-circuits IDs without calendarList.list
+      expect(mockCalendar.events.list).toHaveBeenCalledTimes(1);
     });
 
-    it('should call API only once for multiple name resolutions', async () => {
+    it('should resolve a single name with one lookup and one events.list', async () => {
       const args = {
-        calendarId: ['Work Calendar', 'Personal Calendar', 'My Team'],  // Pass as array
+        calendarId: 'Work Calendar',
         timeMin: '2025-06-02T00:00:00Z',
         timeMax: '2025-06-09T23:59:59Z'
       };
 
       mockCalendar.calendarList.list.mockClear();
-
-      global.fetch = vi.fn().mockResolvedValue({
-        ok: true,
-        status: 200,
-        headers: {
-          get: vi.fn()
-        },
-        text: () => Promise.resolve(`--batch_boundary
-Content-Type: application/http
-
-HTTP/1.1 200 OK
-
-{"items": []}
---batch_boundary--`)
-      });
+      mockCalendar.events.list.mockClear();
 
       await handler.runTool(args, mockAccounts);
 
-      // Should have called calendarList.list exactly once
-      expect(mockCalendar.calendarList.list).toHaveBeenCalledTimes(1);
+      expect(mockCalendar.events.list).toHaveBeenCalledTimes(1);
+      expect(mockCalendar.events.list).toHaveBeenCalledWith(
+        expect.objectContaining({ calendarId: 'work@example.com' })
+      );
     });
   });
 
   describe('input validation', () => {
-    it('should filter out empty strings', async () => {
+    it('should reject empty string calendarId', async () => {
       const args = {
-        calendarId: ['primary', '', 'Work Calendar'],  // Pass as array
+        calendarId: '',
         timeMin: '2025-06-02T00:00:00Z',
         timeMax: '2025-06-09T23:59:59Z'
-      };
-
-      global.fetch = vi.fn().mockResolvedValue({
-        ok: true,
-        status: 200,
-        headers: {
-          get: vi.fn()
-        },
-        text: () => Promise.resolve(`--batch_boundary
-Content-Type: application/http
-
-HTTP/1.1 200 OK
-
-{"items": []}
---batch_boundary--`)
-      });
-
-      // Should not throw - empty string should be filtered out
-      await expect(handler.runTool(args, mockAccounts)).resolves.toBeDefined();
-    });
-
-    it('should reject when all inputs are empty/whitespace', async () => {
-      const args = {
-        calendarId: ['', '  ', '\t'],  // Pass as array
-        timeMin: '2025-06-02T00:00:00Z',
-        timeMax: '2025-06-09T23:59:59Z'
-      };
+      } as any;
 
       await expect(handler.runTool(args, mockAccounts)).rejects.toThrow(
-        /At least one valid calendar identifier is required/
+        /exactly one.*calendarId/i
+      );
+    });
+
+    it('should reject array calendarId even with empty entries', async () => {
+      const args = {
+        calendarId: ['', '  ', '\t'],
+        timeMin: '2025-06-02T00:00:00Z',
+        timeMax: '2025-06-09T23:59:59Z'
+      } as any;
+
+      await expect(handler.runTool(args, mockAccounts)).rejects.toThrow(
+        /exactly one.*calendarId/i
       );
     });
   });

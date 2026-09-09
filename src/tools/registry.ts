@@ -245,25 +245,21 @@ export const ToolSchemas = {
 
   'list-events': z.object({
     account: multiAccountSchema,
-    calendarId: z.union([
-      z.string().describe(
-        "Calendar identifier(s) to query. Accepts calendar IDs (e.g., 'primary', 'user@gmail.com') OR calendar names (e.g., 'Work', 'Personal'). Single calendar: 'primary'. Multiple calendars: array ['Work', 'Personal'] or JSON string '[\"Work\", \"Personal\"]'"
-      ),
-      z.array(z.string().min(1))
-        .min(1, "At least one calendar ID is required")
-        .max(50, "Maximum 50 calendars allowed per request")
-        .refine(
-          (arr) => new Set(arr).size === arr.length,
-          "Duplicate calendar IDs are not allowed"
-        )
-        .describe("Array of calendar IDs to query events from (max 50, no duplicates)")
-    ]),
+    calendarId: z.string().min(1, "Calendar ID must be a non-empty string").describe(
+      "Calendar identifier to query. Accepts a calendar ID (e.g., 'primary', 'user@gmail.com') OR a calendar name (e.g., 'Work'). Single calendar only."
+    ),
     timeMin: timeMinSchema,
     timeMax: timeMaxSchema,
     timeZone: timeZoneSchema,
     fields: fieldsSchema,
     privateExtendedProperty: privateExtendedPropertySchema,
-    sharedExtendedProperty: sharedExtendedPropertySchema
+    sharedExtendedProperty: sharedExtendedPropertySchema,
+    pageSize: z.number().int().min(1).max(20).optional().describe(
+      "Maximum number of events per page (1-20). Passed as maxResults to the Calendar API."
+    ),
+    pageToken: z.string().max(2048, "pageToken must be at most 2048 characters").optional().describe(
+      "Opaque page token from a previous list-events response (nextPageToken). Passed through verbatim."
+    )
   }),
   
   'search-events': z.object({
@@ -803,69 +799,22 @@ export class ToolRegistry {
     {
       name: "list-events",
       title: "List Calendar Events",
-      description: "List events from one or more calendars. Supports both calendar IDs and calendar names.",
+      description: "List events from a single calendar. Supports calendar IDs and calendar names. Paginated via pageSize/pageToken.",
       annotations: READ_ONLY_ANNOTATIONS,
       schema: ToolSchemas['list-events'],
       handler: ListEventsHandler,
-      handlerFunction: async (args: ListEventsInput & { calendarId: string | string[] }) => {
-        let processedCalendarId: string | string[] = args.calendarId;
-
-        // If it's already an array (native array format), keep as-is (already validated by schema)
-        if (Array.isArray(args.calendarId)) {
-          processedCalendarId = args.calendarId;
-        }
-        // Handle JSON string format (double or single-quoted)
-        else if (typeof args.calendarId === 'string' && args.calendarId.trim().startsWith('[') && args.calendarId.trim().endsWith(']')) {
-          try {
-            let jsonString = args.calendarId.trim();
-
-            // Normalize single-quoted JSON-like strings to valid JSON (Python/shell style)
-            // Only replace single quotes that are string delimiters (after '[', ',', or before ']', ',')
-            // This avoids breaking calendar IDs with apostrophes like "John's Calendar"
-            if (jsonString.includes("'")) {
-              jsonString = jsonString
-                .replace(/\[\s*'/g, '["')           // [' -> ["
-                .replace(/'\s*,\s*'/g, '", "')      // ', ' -> ", "
-                .replace(/'\s*\]/g, '"]');          // '] -> "]
-            }
-
-            const parsed = JSON.parse(jsonString);
-
-            // Validate parsed result
-            if (!Array.isArray(parsed)) {
-              throw new Error('JSON string must contain an array');
-            }
-            if (!parsed.every(id => typeof id === 'string' && id.length > 0)) {
-              throw new Error('Array must contain only non-empty strings');
-            }
-            if (parsed.length === 0) {
-              throw new Error("At least one calendar ID is required");
-            }
-            if (parsed.length > 50) {
-              throw new Error("Maximum 50 calendars allowed");
-            }
-            if (new Set(parsed).size !== parsed.length) {
-              throw new Error("Duplicate calendar IDs are not allowed");
-            }
-
-            processedCalendarId = parsed;
-          } catch (error) {
-            throw new Error(
-              `Invalid JSON format for calendarId: ${error instanceof Error ? error.message : 'Unknown parsing error'}`
-            );
-          }
-        }
-        // Otherwise it's a single string calendar ID - keep as-is
-
+      handlerFunction: async (args: ListEventsInput) => {
         return {
           account: args.account,
-          calendarId: processedCalendarId,
+          calendarId: args.calendarId,
           timeMin: args.timeMin,
           timeMax: args.timeMax,
           timeZone: args.timeZone,
           fields: args.fields,
           privateExtendedProperty: args.privateExtendedProperty,
-          sharedExtendedProperty: args.sharedExtendedProperty
+          sharedExtendedProperty: args.sharedExtendedProperty,
+          pageSize: args.pageSize,
+          pageToken: args.pageToken
         };
       }
     },

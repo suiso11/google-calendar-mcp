@@ -139,7 +139,7 @@ describe('Tool Registration', () => {
     }
   });
 
-  it('should properly extract schema for list-events calendarId union', async () => {
+  it('should properly extract schema for list-events single calendarId', async () => {
     await ToolRegistry.registerAll(mockServer, async () => ({ content: [] }));
 
     const listEventsTool = registeredTools.find(t => t.name === 'list-events');
@@ -190,7 +190,7 @@ describe('Tool Registration', () => {
     await ToolRegistry.registerAll(mockServer, async () => ({ content: [] }));
 
     // Tools with union/preprocessed shapes on the readonly surface
-    const complexTools = ['list-events', 'search-events'];
+    const complexTools = ['search-events'];
 
     for (const toolName of complexTools) {
       const tool = registeredTools.find(t => t.name === toolName);
@@ -273,7 +273,7 @@ describe('Schema Extraction Edge Cases', () => {
   });
 
   it('should handle union schemas', () => {
-    const unionSchema = ToolSchemas['list-events'];
+    const unionSchema = ToolSchemas['search-events'];
     const extractedShape = (ToolRegistry as any).extractSchemaShape(unionSchema);
     expect(extractedShape).toBeDefined();
     expect(typeof extractedShape).toBe('object');
