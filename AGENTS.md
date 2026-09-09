@@ -1,48 +1,30 @@
-# Agent Guidelines
+# Agent Guidelines (readonly fork)
 
-This document provides instructions for AI agents interacting with the Google Calendar MCP server.
+This server exposes exactly four read-only MCP tools: `list-calendars`, `list-events`, `search-events`, `get-event`. There are no write, free/busy, color, current-time, or account-management tools.
 
-## Multi-Account Handling
+## Tool Use
 
-This server supports connecting to multiple Google accounts simultaneously (e.g., "work", "personal").
+- `list-events` and `search-events` require exactly one account and one calendar (`calendarId`) per request, with `pageSize <= 20` / `pageToken` pagination (one page per request).
+- When only one account is connected, `account` may be omitted; when several accounts are connected, pass exactly one `account`. There is no multi-account merge and no multi-calendar fan-out.
+- `get-event` takes a single account, calendar, and event ID.
+- `list-calendars` is a lookup helper for ID/name resolution (calendarList access remains an adoption gate pending fresh-grant validation; availability is not claimed).
+- Never attempt writes: no create/update/delete, no respond, no batch creation, and no availability or color operations.
 
-### Detecting Accounts
-You can list available accounts using the `list-calendars` tool. The tool will return calendars from all connected accounts.
+## Authentication
 
-### Using the `account` Parameter
-Most tools accept an optional `account` parameter.
+Accounts are provisioned out of band only (standalone auth command or local HTTP account page). There is no in-chat/MCP authentication or account-management tool.
 
-- **If `account` is OMITTED**:
-    - Read operations (like `list-events`) will query **all** accounts and merge results.
-    - Write operations (like `create-event`) will try to intelligently select the best account based on permissions.
+## Example: Listing Events
 
-- **If `account` is SPECIFIED**:
-    - The operation is restricted to that specific account (or list of accounts).
-    - Use this when the user explicitly asks to "check my work calendar" or "add this to my personal schedule".
-
-### Example: Listing Events
 ```json
 {
   "name": "list-events",
   "arguments": {
+    "calendarId": "primary",
     "timeMin": "2023-10-27T00:00:00Z",
-    "account": ["work"]
-  }
-}
-```
-
-### Example: Creating Events
-```json
-{
-  "name": "create-event",
-  "arguments": {
-    "summary": "Meeting",
-    "start": "...",
-    "end": "...",
+    "timeMax": "2023-10-28T00:00:00Z",
+    "pageSize": 20,
     "account": "work"
   }
 }
 ```
-
-## Calendar Deduplication
-The server automatically handles shared calendars. If a calendar is shared between "work" and "personal", it will appear as a single unified calendar in `list-calendars`. You generally don't need to worry about duplicates.

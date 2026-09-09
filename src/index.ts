@@ -112,7 +112,7 @@ Examples:
   npx @cocal/google-calendar-mcp auth              # Authenticate default account
   npx @cocal/google-calendar-mcp auth work         # Authenticate "work" account
   npx @cocal/google-calendar-mcp start
-  npx @cocal/google-calendar-mcp start --enable-tools list-events,create-event,get-current-time
+  npx @cocal/google-calendar-mcp start --enable-tools list-calendars,list-events
   npx @cocal/google-calendar-mcp
 
 Environment Variables:

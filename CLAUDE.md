@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-Google Calendar MCP Server - A Model Context Protocol (MCP) server providing Google Calendar integration for AI assistants. Built with TypeScript, supports both stdio and HTTP transports, with OAuth 2.0 authentication.
+Google Calendar MCP Server (readonly fork) - A Model Context Protocol (MCP) server providing read-only Google Calendar integration for AI assistants. Built with TypeScript, supports both stdio and HTTP transports, with OAuth 2.0 authentication. Exposes exactly four MCP tools — `list-calendars`, `list-events`, `search-events`, `get-event` — with no writes and no account-management tools.
 
 ## Development Commands
 
@@ -72,8 +72,8 @@ Client → Transport Layer → Schema Validation (Zod) → Handler → Google Ca
 
 ### Authentication System
 
-- **OAuth 2.0** with refresh token support
-- **Multi-account**: Supports multiple accounts with friendly nicknames (e.g., `work`, `personal`). Use the `manage-accounts` tool in chat, or `npm run account auth <nickname>` from CLI to add additional accounts.
+- **OAuth 2.0** with refresh token support and readonly `calendar.events.readonly` scope only
+- **Accounts**: Multiple accounts may be connected out of band via `npm run account auth <nickname>` or the local HTTP account page (out-of-band consent only, never an MCP/model tool). `list-events` and `search-events` require exactly one account and one calendar per request; there is no multi-account merge and no multi-calendar fan-out.
 - **Token Storage**: `~/.config/google-calendar-mcp/tokens.json` (platform-specific paths)
 - **Token Validation**: Automatic refresh on expiry
 - **Components**:
@@ -149,12 +149,11 @@ npm run dev test:integration:direct
 **Conflict Detection** (`src/services/conflict-detection/`):
 - `EventSimilarityChecker.ts` - Detects scheduling conflicts, identifies duplicate events, and analyzes event overlap
 - `ConflictDetectionService.ts` - Main service coordinating conflict and duplicate checks
-- Used by `create-event` and `update-event` handlers
+- Read-only query support only; there are no create/update handlers in this fork
 
 **Calendar Registry** (`src/services/CalendarRegistry.ts`):
-- Calendar deduplication across multiple accounts
-- Permission-based account auto-selection (read vs write)
-- Calendar name-to-ID resolution with caching
+- Calendar ID/name resolution with caching for single-calendar read-only queries
+- `list-calendars` / calendarList access remains an adoption gate pending fresh-grant validation (availability is not claimed)
 
 **Structured Responses** (`src/types/structured-responses.ts`):
 - TypeScript interfaces for consistent response formats
@@ -176,17 +175,16 @@ npm run dev test:integration:direct
 - **All-day Events**: Date only format (e.g., `2024-01-01`)
 - **Helper**: `getCalendarTimezone()` method in `BaseToolHandler`
 
-### Multi-Calendar Support
+### Read-Only Tools
 
-- `list-events` accepts single calendar ID or JSON array: `'["cal1", "cal2"]'`
-- Batch requests handled by `BatchRequestHandler.ts`
-- Maximum 50 calendars per request
+This fork exposes exactly four MCP tools — `list-calendars`, `list-events`, `search-events`, `get-event` — with no writes and no account-management tools.
 
-### Recurring Events
+- `list-events` and `search-events` require exactly one account and one calendar per request; paginated via `pageSize` (1-20) / `pageToken` (one `events.list` call per request, no auto-pagination or merging)
+- There is no multi-account merge and no multi-calendar fan-out
 
-- Modification scopes: `thisEventOnly`, `thisAndFollowing`, `all`
-- Handled by `RecurringEventHelpers.ts`
-- Special validation in `update-event` schema
+### Recurring Events (read-only)
+
+- Recurring events are returned by read-only list/search/get queries; this fork provides no modification scopes and no update operations
 
 ### Error Handling
 
@@ -214,7 +212,7 @@ MCP tools return errors as successful responses with error content, not as throw
 - **Version**: v3 (`googleapis` package)
 - **Timeout**: 3 seconds per API call (configured in `BaseToolHandler`)
 - **Rate Limiting**: Google Calendar API has quotas - integration tests may hit limits
-- **Scope Required**: `https://www.googleapis.com/auth/calendar` (full calendar access, superset of `calendar.events`)
+- **Scope Required**: `https://www.googleapis.com/auth/calendar.events.readonly` (readonly event access only; no broader Calendar scopes)
 
 ## Deployment
 

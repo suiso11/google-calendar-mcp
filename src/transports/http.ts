@@ -6,6 +6,7 @@ import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import { TokenManager } from "../auth/tokenManager.js";
 import { CalendarRegistry } from "../services/CalendarRegistry.js";
 import { renderAuthSuccess, renderAuthError, loadWebFile } from "../web/templates.js";
+import { READONLY_CALENDAR_SCOPES } from "../auth/scopes.js";
 
 /**
  * Security headers for HTML responses
@@ -88,7 +89,7 @@ export class HttpTransportHandler {
   private generateOAuthUrl(client: import('google-auth-library').OAuth2Client): string {
     return client.generateAuthUrl({
       access_type: 'offline',
-      scope: ['https://www.googleapis.com/auth/calendar'],
+      scope: [...READONLY_CALENDAR_SCOPES],
       prompt: 'consent'
     });
   }

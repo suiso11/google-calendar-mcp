@@ -30,6 +30,10 @@ describe('Field Mask Builder', () => {
       const result = validateFields([...ALLOWED_EVENT_FIELDS]);
       expect(result).toEqual(ALLOWED_EVENT_FIELDS);
     });
+
+    it('should accept etag as an explicit field', () => {
+      expect(validateFields(['etag'])).toEqual(['etag']);
+    });
   });
 
   describe('buildEventFieldMask', () => {
@@ -68,6 +72,11 @@ describe('Field Mask Builder', () => {
       const fields = ['description', 'invalidfield'];
       expect(() => buildEventFieldMask(fields)).toThrow('Invalid fields requested: invalidfield');
     });
+
+    it('should include etag by default in custom masks', () => {
+      const result = buildEventFieldMask(['description']);
+      expect(result).toContain('etag');
+    });
   });
 
   describe('buildSingleEventFieldMask', () => {
@@ -92,6 +101,11 @@ describe('Field Mask Builder', () => {
       const fields = ['description', 'colorId'];
       const result = buildSingleEventFieldMask(fields, false);
       expect(result).toBe('description,colorId');
+    });
+
+    it('should include etag by default in single-event masks', () => {
+      const result = buildSingleEventFieldMask(['description']);
+      expect(result).toContain('etag');
     });
   });
 

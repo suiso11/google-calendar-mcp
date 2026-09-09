@@ -1,7 +1,8 @@
 import { OAuth2Client, Credentials } from 'google-auth-library';
 import fs from 'fs/promises';
-import { getSecureTokenPath, getAccountMode, getLegacyTokenPath } from './utils.js';
+import { getSecureTokenPath, getAccountMode } from './utils.js';
 import { validateAccountId } from './paths.js';
+import { assertValidGrantedScopes, isValidGrantedScopes, INVALID_TOKEN_SCOPES_MESSAGE } from './scopes.js';
 import { GaxiosError } from 'gaxios';
 import { mkdir } from 'fs/promises';
 import { dirname } from 'path';
@@ -93,14 +94,10 @@ export class TokenManager {
       const fileContent = await fs.readFile(this.tokenPath, "utf-8");
       const parsed = JSON.parse(fileContent);
 
-      // Check if this is the old single-account format
-      if (parsed.access_token || parsed.refresh_token) {
-        // Convert old format to new multi-account format
-        const multiAccountTokens: MultiAccountTokens = {
-          normal: parsed
-        };
-        await this.saveMultiAccountTokens(multiAccountTokens);
-        return multiAccountTokens;
+      // Reject top-level legacy single-account format even at the readonly path.
+      // Never migrate, rewrite, or delete the file here.
+      if (parsed && typeof parsed === "object" && (parsed.access_token || parsed.refresh_token)) {
+        throw new Error("Legacy token format rejected; re-authentication required");
       }
 
       // Already in multi-account format
@@ -191,42 +188,6 @@ export class TokenManager {
     });
   }
 
-  private async migrateLegacyTokens(): Promise<boolean> {
-    const legacyPath = getLegacyTokenPath();
-    try {
-      // Check if legacy tokens exist
-      if (!(await fs.access(legacyPath).then(() => true).catch(() => false))) {
-        return false; // No legacy tokens to migrate
-      }
-
-      // Read legacy tokens
-      const legacyTokens = JSON.parse(await fs.readFile(legacyPath, "utf-8"));
-      
-      if (!legacyTokens || typeof legacyTokens !== "object") {
-        process.stderr.write("Invalid legacy token format, skipping migration\n");
-        return false;
-      }
-
-      // Copy to new location (ensures directory exists)
-      await this.writeTokenFile(legacyTokens);
-      
-      process.stderr.write(`Migrated tokens from legacy location: ${legacyPath} to: ${this.tokenPath}\n`);
-      
-      // Optionally remove legacy file after successful migration
-      try {
-        await fs.unlink(legacyPath);
-        process.stderr.write("Removed legacy token file\n");
-      } catch (unlinkErr) {
-        process.stderr.write(`Warning: Could not remove legacy token file: ${unlinkErr}\n`);
-      }
-      
-      return true;
-    } catch (error) {
-      process.stderr.write(`Error migrating legacy tokens: ${error}\n`);
-      return false;
-    }
-  }
-
   async loadSavedTokens(): Promise<boolean> {
     try {
       await this.ensureTokenDirectoryExists();
@@ -234,13 +195,11 @@ export class TokenManager {
       // Check if current token file exists
       const tokenExists = await fs.access(this.tokenPath).then(() => true).catch(() => false);
       
-      // If no current tokens, try to migrate from legacy location
+      // Readonly runtime never migrates broad-scope legacy tokens.
+      // Absent readonly file means fresh consent is required.
       if (!tokenExists) {
-        const migrated = await this.migrateLegacyTokens();
-        if (!migrated) {
-          process.stderr.write(`No token file found at: ${this.tokenPath}\n`);
-          return false;
-        }
+        process.stderr.write(`No token file found at: ${this.tokenPath}\n`);
+        return false;
       }
 
       const multiAccountTokens = await this.loadMultiAccountTokens();
@@ -248,6 +207,11 @@ export class TokenManager {
 
       if (!tokens || typeof tokens !== "object") {
         process.stderr.write(`No tokens found for ${this.accountMode} account in file: ${this.tokenPath}\n`);
+        return false;
+      }
+
+      if (!isValidGrantedScopes((tokens as Credentials).scope)) {
+        process.stderr.write(`${INVALID_TOKEN_SCOPES_MESSAGE}\n`);
         return false;
       }
 
@@ -351,6 +315,7 @@ export class TokenManager {
 
   async saveTokens(tokens: Credentials, email?: string): Promise<void> {
     try {
+        assertValidGrantedScopes(tokens?.scope);
         // Wrap entire read-modify-write in the queue to prevent race conditions
         await this.enqueueTokenWrite(async () => {
           const multiAccountTokens = await this.loadMultiAccountTokens();
@@ -459,6 +424,23 @@ export class TokenManager {
     try {
       const multiAccountTokens = await this.loadMultiAccountTokens();
 
+      // Fail closed: any persisted account with missing/broad/extra scopes
+      // rejects the whole file before any setCredentials/client creation.
+      // Never rewrites or deletes the file here; startup stays non-blocking.
+      for (const tokens of Object.values(multiAccountTokens)) {
+        if (!tokens || typeof tokens !== 'object') {
+          continue;
+        }
+        const candidate = tokens as Credentials;
+        if (!candidate.access_token) {
+          continue;
+        }
+        if (!isValidGrantedScopes(candidate.scope)) {
+          process.stderr.write(`${INVALID_TOKEN_SCOPES_MESSAGE}\n`);
+          return new Map();
+        }
+      }
+
       // Remove accounts that no longer exist in token file
       for (const accountId of this.accounts.keys()) {
         if (!multiAccountTokens[accountId]) {
@@ -516,6 +498,13 @@ export class TokenManager {
       // Check for file not found error (works with both Error objects and plain objects)
       if (error && error.code === 'ENOENT') {
         // No token file exists, return empty map
+        return new Map();
+      }
+      // Legacy top-level format is unauthenticated, never blocking startup.
+      if (error instanceof Error && error.message === "Legacy token format rejected; re-authentication required") {
+        return new Map();
+      }
+      if (error instanceof Error && error.message === INVALID_TOKEN_SCOPES_MESSAGE) {
         return new Map();
       }
       throw error;

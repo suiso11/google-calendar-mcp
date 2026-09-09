@@ -6,6 +6,8 @@ import fs from 'fs/promises';
 // Mock the entire fs/promises module
 vi.mock('fs/promises');
 
+const READONLY_SCOPE = 'https://www.googleapis.com/auth/calendar.events.readonly';
+
 describe('TokenManager - Multi-Account Support', () => {
   let oauth2Client: OAuth2Client;
   let tokenManager: TokenManager;
@@ -22,11 +24,13 @@ describe('TokenManager - Multi-Account Support', () => {
         work: {
           access_token: 'work-access',
           refresh_token: 'work-refresh',
+          scope: READONLY_SCOPE,
           expiry_date: Date.now() + 3600000
         },
         personal: {
           access_token: 'personal-access',
           refresh_token: 'personal-refresh',
+          scope: READONLY_SCOPE,
           expiry_date: Date.now() + 3600000
         }
       };
@@ -54,12 +58,14 @@ describe('TokenManager - Multi-Account Support', () => {
       const mockTokens = {
         work: {
           access_token: 'work-access',
-          refresh_token: 'work-refresh'
+          refresh_token: 'work-refresh',
+          scope: READONLY_SCOPE
         },
         invalid: null, // Invalid entry
         personal: {
           access_token: 'personal-access',
-          refresh_token: 'personal-refresh'
+          refresh_token: 'personal-refresh',
+          scope: READONLY_SCOPE
         }
       };
 
@@ -77,11 +83,13 @@ describe('TokenManager - Multi-Account Support', () => {
       const mockTokens = {
         'valid-account': {
           access_token: 'valid-access',
-          refresh_token: 'valid-refresh'
+          refresh_token: 'valid-refresh',
+          scope: READONLY_SCOPE
         },
         '../../../etc/passwd': { // Invalid account ID
           access_token: 'bad-access',
-          refresh_token: 'bad-refresh'
+          refresh_token: 'bad-refresh',
+          scope: READONLY_SCOPE
         }
       };
 
@@ -100,7 +108,8 @@ describe('TokenManager - Multi-Account Support', () => {
       const mockTokens = {
         work: {
           access_token: 'work-access',
-          refresh_token: 'work-refresh'
+          refresh_token: 'work-refresh',
+          scope: READONLY_SCOPE
         }
       };
 
@@ -132,11 +141,13 @@ describe('TokenManager - Multi-Account Support', () => {
       const mockTokens = {
         work: {
           access_token: 'work-access',
-          refresh_token: 'work-refresh'
+          refresh_token: 'work-refresh',
+          scope: READONLY_SCOPE
         },
         personal: {
           access_token: 'personal-access',
-          refresh_token: 'personal-refresh'
+          refresh_token: 'personal-refresh',
+          scope: READONLY_SCOPE
         }
       };
 
@@ -168,11 +179,13 @@ describe('TokenManager - Multi-Account Support', () => {
         work: {
           access_token: 'work-access',
           refresh_token: 'work-refresh',
+          scope: READONLY_SCOPE,
           expiry_date: Date.now() + 3600000 // Valid access token
         },
         personal: {
           // No refresh_token and expired access token = truly expired
           access_token: 'personal-access',
+          scope: READONLY_SCOPE,
           expiry_date: Date.now() - 3600000 // Expired
         }
       };
@@ -194,6 +207,7 @@ describe('TokenManager - Multi-Account Support', () => {
         work: {
           access_token: 'work-access',
           refresh_token: 'work-refresh',
+          scope: READONLY_SCOPE,
           expiry_date: Date.now() - 3600000 // Expired access token, but has refresh
         }
       };
@@ -214,11 +228,13 @@ describe('TokenManager - Multi-Account Support', () => {
       const mockTokens = {
         work: {
           access_token: 'work-access',
-          refresh_token: 'work-refresh'
+          refresh_token: 'work-refresh',
+          scope: READONLY_SCOPE
         },
         personal: {
           access_token: 'personal-access',
-          refresh_token: 'personal-refresh'
+          refresh_token: 'personal-refresh',
+          scope: READONLY_SCOPE
         }
       };
 
@@ -237,11 +253,13 @@ describe('TokenManager - Multi-Account Support', () => {
       const mockTokens = {
         work: {
           access_token: 'work-access-old',
-          refresh_token: 'work-refresh'
+          refresh_token: 'work-refresh',
+          scope: READONLY_SCOPE
         },
         personal: {
           access_token: 'personal-access',
-          refresh_token: 'personal-refresh'
+          refresh_token: 'personal-refresh',
+          scope: READONLY_SCOPE
         }
       };
 
