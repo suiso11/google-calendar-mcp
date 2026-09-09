@@ -1,6 +1,6 @@
 import { OAuth2Client, Credentials } from 'google-auth-library';
 import fs from 'fs/promises';
-import { getSecureTokenPath, getAccountMode, getLegacyTokenPath } from './utils.js';
+import { getSecureTokenPath, getAccountMode } from './utils.js';
 import { validateAccountId } from './paths.js';
 import { GaxiosError } from 'gaxios';
 import { mkdir } from 'fs/promises';
@@ -191,42 +191,6 @@ export class TokenManager {
     });
   }
 
-  private async migrateLegacyTokens(): Promise<boolean> {
-    const legacyPath = getLegacyTokenPath();
-    try {
-      // Check if legacy tokens exist
-      if (!(await fs.access(legacyPath).then(() => true).catch(() => false))) {
-        return false; // No legacy tokens to migrate
-      }
-
-      // Read legacy tokens
-      const legacyTokens = JSON.parse(await fs.readFile(legacyPath, "utf-8"));
-      
-      if (!legacyTokens || typeof legacyTokens !== "object") {
-        process.stderr.write("Invalid legacy token format, skipping migration\n");
-        return false;
-      }
-
-      // Copy to new location (ensures directory exists)
-      await this.writeTokenFile(legacyTokens);
-      
-      process.stderr.write(`Migrated tokens from legacy location: ${legacyPath} to: ${this.tokenPath}\n`);
-      
-      // Optionally remove legacy file after successful migration
-      try {
-        await fs.unlink(legacyPath);
-        process.stderr.write("Removed legacy token file\n");
-      } catch (unlinkErr) {
-        process.stderr.write(`Warning: Could not remove legacy token file: ${unlinkErr}\n`);
-      }
-      
-      return true;
-    } catch (error) {
-      process.stderr.write(`Error migrating legacy tokens: ${error}\n`);
-      return false;
-    }
-  }
-
   async loadSavedTokens(): Promise<boolean> {
     try {
       await this.ensureTokenDirectoryExists();
@@ -234,13 +198,11 @@ export class TokenManager {
       // Check if current token file exists
       const tokenExists = await fs.access(this.tokenPath).then(() => true).catch(() => false);
       
-      // If no current tokens, try to migrate from legacy location
+      // Readonly runtime never migrates broad-scope legacy tokens.
+      // Absent readonly file means fresh consent is required.
       if (!tokenExists) {
-        const migrated = await this.migrateLegacyTokens();
-        if (!migrated) {
-          process.stderr.write(`No token file found at: ${this.tokenPath}\n`);
-          return false;
-        }
+        process.stderr.write(`No token file found at: ${this.tokenPath}\n`);
+        return false;
       }
 
       const multiAccountTokens = await this.loadMultiAccountTokens();

@@ -250,3 +250,34 @@ describe('TokenManager - setAccountMode', () => {
     expect(tokenManager.getAccountMode()).toBe('family');
   });
 });
+
+describe('TokenManager - loadSavedTokens readonly isolation', () => {
+  let tokenManager: any;
+  let mockOAuth2Client: OAuth2Client;
+  const mockedFs = fs as any;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+
+    mockOAuth2Client = new OAuth2Client('client-id', 'client-secret', 'redirect-uri');
+
+    mockedFs.mkdir.mockResolvedValue(undefined);
+    mockedFs.access.mockRejectedValue({ code: 'ENOENT' });
+
+    const { TokenManager } = await import('../../../auth/tokenManager.js');
+    tokenManager = new TokenManager(mockOAuth2Client);
+  });
+
+  afterEach(() => {
+    vi.resetModules();
+  });
+
+  it('should return false with no readonly token and perform no legacy read/copy/delete', async () => {
+    const result = await tokenManager.loadSavedTokens();
+
+    expect(result).toBe(false);
+    expect(mockedFs.readFile).not.toHaveBeenCalled();
+    expect(mockedFs.writeFile).not.toHaveBeenCalled();
+    expect(mockedFs.unlink).not.toHaveBeenCalled();
+  });
+});
