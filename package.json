@@ -1,7 +1,7 @@
 {
   "name": "@cocal/google-calendar-mcp",
-  "version": "2.6.3",
-  "description": "Google Calendar MCP Server with extensive support for calendar management",
+  "version": "3.0.0-readonly.1",
+  "description": "readonly Companion Calendar MCP fork",
   "type": "module",
   "main": "build/index.js",
   "bin": {
@@ -24,12 +24,12 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/nspady/google-calendar-mcp.git"
+    "url": "git+https://github.com/suiso11/google-calendar-mcp.git"
   },
   "bugs": {
-    "url": "https://github.com/nspady/google-calendar-mcp/issues"
+    "url": "https://github.com/suiso11/google-calendar-mcp/issues"
   },
-  "homepage": "https://github.com/nspady/google-calendar-mcp#readme",
+  "homepage": "https://github.com/suiso11/google-calendar-mcp#readme",
   "author": "nspady",
   "license": "MIT",
   "scripts": {
@@ -62,5 +62,6 @@
     "js-tiktoken": "^1.0.21",
     "typescript": "^5.3.3",
     "vitest": "^4.0.18"
-  }
+  },
+  "private": true
 }

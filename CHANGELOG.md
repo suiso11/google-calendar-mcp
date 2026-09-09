@@ -1,5 +1,9 @@
 # Changelog
 
+## 3.0.0-readonly.1
+
+Readonly Companion Calendar MCP fork prerelease. Breaking change: MCP surface is read-only (`list-calendars`, `list-events`, `search-events`, `get-event`); no write operations. Release identity is private (`private: true`, version `3.0.0-readonly.1`) and never published to npm; upstream `publish.yml` release workflow removed.
+
 ## [2.6.3](https://github.com/nspady/google-calendar-mcp/compare/v2.6.2...v2.6.3) (2026-09-02)
 
 
