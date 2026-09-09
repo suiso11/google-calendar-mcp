@@ -93,14 +93,10 @@ export class TokenManager {
       const fileContent = await fs.readFile(this.tokenPath, "utf-8");
       const parsed = JSON.parse(fileContent);
 
-      // Check if this is the old single-account format
-      if (parsed.access_token || parsed.refresh_token) {
-        // Convert old format to new multi-account format
-        const multiAccountTokens: MultiAccountTokens = {
-          normal: parsed
-        };
-        await this.saveMultiAccountTokens(multiAccountTokens);
-        return multiAccountTokens;
+      // Reject top-level legacy single-account format even at the readonly path.
+      // Never migrate, rewrite, or delete the file here.
+      if (parsed && typeof parsed === "object" && (parsed.access_token || parsed.refresh_token)) {
+        throw new Error("Legacy token format rejected; re-authentication required");
       }
 
       // Already in multi-account format
@@ -478,6 +474,10 @@ export class TokenManager {
       // Check for file not found error (works with both Error objects and plain objects)
       if (error && error.code === 'ENOENT') {
         // No token file exists, return empty map
+        return new Map();
+      }
+      // Legacy top-level format is unauthenticated, never blocking startup.
+      if (error instanceof Error && error.message === "Legacy token format rejected; re-authentication required") {
         return new Map();
       }
       throw error;
