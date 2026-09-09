@@ -14,8 +14,6 @@ import { TokenManager } from './auth/tokenManager.js';
 // Import tool registry
 import { ToolRegistry } from './tools/registry.js';
 
-// Import account management handler
-import { ManageAccountsHandler, ServerContext } from './handlers/core/ManageAccountsHandler.js';
 import { z } from 'zod';
 import { CalendarRegistry } from './services/CalendarRegistry.js';
 
@@ -81,11 +79,10 @@ export class GoogleCalendarMcpServer {
       const hasValidTokens = await this.tokenManager.validateTokens(accountMode);
       if (!hasValidTokens) {
         // No existing tokens - server will start but calendar tools won't work
-        // User can authenticate via the 'manage-accounts' tool
         process.stderr.write(`⚠️  No authenticated accounts found.\n`);
-        process.stderr.write(`Use the 'manage-accounts' tool with action 'add' to authenticate a Google account, or run:\n`);
+        process.stderr.write(`Run out-of-band authentication:\n`);
         process.stderr.write(`  npx @cocal/google-calendar-mcp auth\n\n`);
-        // Don't exit - allow server to start so add-account tool is available
+        // Don't exit - allow server to start; authenticate out-of-band then restart
       } else {
         process.stderr.write(`Valid ${accountMode} user tokens found.\n`);
         this.accounts = await this.tokenManager.loadAllAccounts();
@@ -116,56 +113,6 @@ export class GoogleCalendarMcpServer {
 
   private registerTools(server: McpServer): void {
     ToolRegistry.registerAll(server, this.executeWithHandler.bind(this), this.config);
-
-    // Register account management tools separately (they need special context)
-    this.registerAccountManagementTools(server);
-  }
-
-  /**
-   * Register the manage-accounts tool that needs access to server internals.
-   * This tool is special because it:
-   * - Doesn't require existing authentication (for 'add' action)
-   * - Needs access to authServer, tokenManager, etc.
-   */
-  private registerAccountManagementTools(server: McpServer): void {
-    // Use arrow functions to keep `this` reference current after reloadAccounts()
-    const self = this;
-    const serverContext: ServerContext = {
-      oauth2Client: this.oauth2Client,
-      tokenManager: this.tokenManager,
-      authServer: this.authServer,
-      get accounts() { return self.accounts; },
-      reloadAccounts: async () => {
-        this.accounts = await this.tokenManager.loadAllAccounts();
-        return this.accounts;
-      }
-    };
-
-    const manageAccountsHandler = new ManageAccountsHandler();
-    server.registerTool(
-      'manage-accounts',
-      {
-        title: 'Manage Google Accounts',
-        description: "Manage Google account authentication. Actions: 'list' (show accounts), 'add' (authenticate new account), 'remove' (remove account).",
-        inputSchema: {
-          action: z.enum(['list', 'add', 'remove'])
-            .describe("Action to perform: 'list' shows all accounts, 'add' authenticates a new account, 'remove' removes an account"),
-          account_id: z.string()
-            .regex(/^[a-z0-9_-]{1,64}$/, "Account nickname must be 1-64 characters: lowercase letters, numbers, dashes, underscores only")
-            .optional()
-            .describe("Account nickname (e.g., 'work', 'personal') - a friendly name to identify this Google account. Required for 'add' and 'remove'. Optional for 'list' (shows all if omitted)")
-        },
-        annotations: {
-          readOnlyHint: false,
-          destructiveHint: true,
-          idempotentHint: false,
-          openWorldHint: false
-        }
-      },
-      async (args) => {
-        return manageAccountsHandler.runTool(args, serverContext);
-      }
-    );
   }
 
   private registerPrompts(server: McpServer): void {

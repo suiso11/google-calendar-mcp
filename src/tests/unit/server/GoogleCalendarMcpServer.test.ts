@@ -15,7 +15,6 @@ const state = vi.hoisted(() => ({
   authServerStart: vi.fn(async () => true),
   authServerStop: vi.fn(async () => undefined),
   toolRegistryRegisterAll: vi.fn(),
-  manageAccountsRunTool: vi.fn(async () => ({ content: [{ type: 'text', text: 'ok' }] })),
   registerTool: vi.fn(),
   registerPrompt: vi.fn(),
   registerResource: vi.fn(),
@@ -70,12 +69,6 @@ vi.mock('../../../auth/server.js', () => ({
 vi.mock('../../../tools/registry.js', () => ({
   ToolRegistry: {
     registerAll: state.toolRegistryRegisterAll
-  }
-}));
-
-vi.mock('../../../handlers/core/ManageAccountsHandler.js', () => ({
-  ManageAccountsHandler: class MockManageAccountsHandler {
-    runTool = state.manageAccountsRunTool;
   }
 }));
 
@@ -134,24 +127,10 @@ describe('GoogleCalendarMcpServer', () => {
     expect(state.tokenManagerLoadAllAccounts).toHaveBeenCalledTimes(1);
     expect(state.toolRegistryRegisterAll).toHaveBeenCalledTimes(1);
     expect(state.mcpServerInstance.tool).not.toHaveBeenCalled();
-    expect(state.registerTool).toHaveBeenCalledTimes(1);
+    expect(state.registerTool).not.toHaveBeenCalled();
+    expect(state.registerTool.mock.calls.filter((call: any[]) => call[0] === 'manage-accounts')).toHaveLength(0);
     expect(state.registerPrompt).toHaveBeenCalledTimes(2);
     expect(state.registerResource).toHaveBeenCalledTimes(1);
-    expect(state.registerTool).toHaveBeenCalledWith(
-      'manage-accounts',
-      expect.objectContaining({
-        title: 'Manage Google Accounts',
-        description: expect.any(String),
-        inputSchema: expect.any(Object),
-        annotations: {
-          readOnlyHint: false,
-          destructiveHint: true,
-          idempotentHint: false,
-          openWorldHint: false
-        }
-      }),
-      expect.any(Function)
-    );
     expect(state.registerPrompt).toHaveBeenCalledWith(
       'daily-agenda-brief',
       expect.objectContaining({
