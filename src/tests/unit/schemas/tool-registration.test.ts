@@ -189,8 +189,8 @@ describe('Tool Registration', () => {
   it('should handle all complex schemas properly', async () => {
     await ToolRegistry.registerAll(mockServer, async () => ({ content: [] }));
 
-    // Tools with union/preprocessed shapes on the readonly surface
-    const complexTools = ['search-events'];
+    // No union/preprocessed shapes remain on the readonly surface (single-calendar pagination)
+    const complexTools: string[] = [];
 
     for (const toolName of complexTools) {
       const tool = registeredTools.find(t => t.name === toolName);
@@ -272,11 +272,12 @@ describe('Schema Extraction Edge Cases', () => {
     expect(extractedShape).toBeDefined();
   });
 
-  it('should handle union schemas', () => {
-    const unionSchema = ToolSchemas['search-events'];
-    const extractedShape = (ToolRegistry as any).extractSchemaShape(unionSchema);
+  it('should handle search-events single-calendar schema', () => {
+    const searchSchema = ToolSchemas['search-events'];
+    const extractedShape = (ToolRegistry as any).extractSchemaShape(searchSchema);
     expect(extractedShape).toBeDefined();
     expect(typeof extractedShape).toBe('object');
+    expect(extractedShape).toHaveProperty('calendarId');
   });
 
   it('should handle nested schema structures', () => {

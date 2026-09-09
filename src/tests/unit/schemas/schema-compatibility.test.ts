@@ -134,7 +134,7 @@ describe('Provider-Specific Schema Compatibility', () => {
       expect(openaiSchema.properties.calendarId.anyOf).toBeUndefined();
     });
 
-    it('should convert search-events calendarId anyOf to string for OpenAI', () => {
+    it('should expose search-events calendarId as single string for OpenAI', () => {
       const tools = ToolRegistry.getToolsWithSchemas();
       const searchEventsTool = tools.find(t => t.name === 'search-events');
 
@@ -143,13 +143,9 @@ describe('Provider-Specific Schema Compatibility', () => {
       // Convert to OpenAI format
       const openaiSchema = convertMCPSchemaToOpenAI(searchEventsTool!.inputSchema);
 
-      // OpenAI should see a simple string type, not anyOf
+      // OpenAI should see a simple string type, not anyOf (single-calendar pagination)
       expect(openaiSchema.properties.calendarId.type).toBe('string');
       expect(openaiSchema.properties.calendarId.anyOf).toBeUndefined();
-
-      // Description should mention JSON array format
-      expect(openaiSchema.properties.calendarId.description).toContain('JSON array string format');
-      expect(openaiSchema.properties.calendarId.description).toMatch(/\[".*"\]/);
     });
 
     it('should ensure all converted schemas are valid objects', () => {
@@ -186,8 +182,8 @@ describe('Provider-Specific Schema Compatibility', () => {
       const problematicFeatures = ['oneOf', 'anyOf', 'allOf', 'not'];
       const issues: string[] = [];
 
-      // Tools explicitly allowed to use anyOf for calendarId (multi-calendar support)
-      const multiCalendarTools = ['search-events'];
+      // No multi-calendar tools remain on the readonly surface (single-calendar pagination)
+      const multiCalendarTools: string[] = [];
 
       for (const tool of tools) {
         // Skip multi-calendar tools - they're explicitly allowed to use anyOf for calendarId
@@ -342,8 +338,8 @@ describe('Schema Validation Rules Documentation', () => {
   it('should document provider-specific compatibility requirements', () => {
     const rules = {
       'OpenAI': 'Schemas are converted to remove anyOf/oneOf/allOf. Union types flattened to primary type with usage notes in description.',
-      'Python MCP': 'Single-calendar list-events uses a plain string calendarId; search-events retains anyOf for native arrays.',
-      'Claude/Generic MCP': 'Uses raw schemas. search-events has anyOf for flexibility; list-events is single-calendar string for paginated reads.',
+      'Python MCP': 'Single-calendar list-events and search-events use a plain string calendarId.',
+      'Claude/Generic MCP': 'Uses raw schemas. list-events and search-events are single-calendar strings for paginated reads.',
       'Top-level schema': 'All schemas must be type: "object" at root level.',
       'DateTime fields': 'Support both RFC3339 with timezone and timezone-naive formats.',
       'Array fields': 'Must have items schema defined for proper validation.',

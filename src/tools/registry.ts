@@ -264,26 +264,11 @@ export const ToolSchemas = {
   
   'search-events': z.object({
     account: multiAccountSchema,
-    calendarId: z.union([
-      z.string().describe(
-        "Calendar identifier(s) to search. Accepts calendar IDs (e.g., 'primary', 'user@gmail.com') OR calendar names (e.g., 'Work', 'Personal'). Single calendar: 'primary'. Multiple calendars: array ['Work', 'Personal'] or JSON string '[\"Work\", \"Personal\"]'"
-      ),
-      z.array(z.string())
-    ]).transform((val) => {
-      if (typeof val === 'string') {
-        // Try to parse JSON array if it looks like one
-        if (val.startsWith('[')) {
-          try {
-            const parsed = JSON.parse(val);
-            if (Array.isArray(parsed)) return parsed;
-          } catch { /* ignore */ }
-        }
-        return val;
-      }
-      return val;
-    }).describe("Calendar identifier(s) to search. Accepts calendar IDs or names. Single or multiple calendars supported."),
-    query: z.string().describe(
-      "Free text search query (searches summary, description, location, attendees, etc.)"
+    calendarId: z.string().min(1, "Calendar ID must be a non-empty string").describe(
+      "Calendar identifier to search. Accepts a calendar ID (e.g., 'primary', 'user@gmail.com') OR a calendar name (e.g., 'Work'). Single calendar only."
+    ),
+    query: z.string().min(1, "Query must be a non-empty string").optional().describe(
+      "Free text search query (searches summary, description, location, attendees, etc.). Omit to list events in the time range."
     ),
     timeMin: z.string()
       .refine(isValidIsoDateTime, "Must be ISO 8601 format: '2026-01-01T00:00:00'")
@@ -306,7 +291,13 @@ export const ToolSchemas = {
       .optional()
       .describe(
         "Filter by shared extended properties (key=value). Matches events that have all specified properties."
-      )
+      ),
+    pageSize: z.number().int().min(1).max(20).optional().describe(
+      "Maximum number of events per page (1-20). Passed as maxResults to the Calendar API."
+    ),
+    pageToken: z.string().max(2048, "pageToken must be at most 2048 characters").optional().describe(
+      "Opaque page token from a previous search-events response (nextPageToken). Passed through verbatim."
+    )
   }),
   
   'get-event': z.object({
@@ -821,7 +812,7 @@ export class ToolRegistry {
     {
       name: "search-events",
       title: "Search Calendar Events",
-      description: "Search for events in a calendar by text query.",
+      description: "Search for events in a single calendar by text query. Paginated via pageSize/pageToken.",
       annotations: READ_ONLY_ANNOTATIONS,
       schema: ToolSchemas['search-events'],
       handler: SearchEventsHandler

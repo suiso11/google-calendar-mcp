@@ -245,15 +245,13 @@ export interface ListEventsResponse {
 export interface SearchEventsResponse {
   events: StructuredEvent[];
   totalCount: number;
-  query: string;
+  query?: string;
   calendarId?: string;
-  calendars?: string[];
-  accounts?: string[];
+  nextPageToken?: string;
   timeRange?: {
     start: string;
     end: string;
   };
-  warnings?: string[];
 }
 
 /**
