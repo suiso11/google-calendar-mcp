@@ -5,19 +5,11 @@ import { BaseToolHandler } from "../handlers/core/BaseToolHandler.js";
 import { ALLOWED_EVENT_FIELDS } from "../utils/field-mask-builder.js";
 import { ServerConfig } from "../config/TransportConfig.js";
 
-// Import all handlers
+// Import readonly handlers only (readonly-mode: write/list-colors/freebusy/current-time/respond handlers are unreachable)
 import { ListCalendarsHandler } from "../handlers/core/ListCalendarsHandler.js";
 import { ListEventsHandler } from "../handlers/core/ListEventsHandler.js";
 import { SearchEventsHandler } from "../handlers/core/SearchEventsHandler.js";
 import { GetEventHandler } from "../handlers/core/GetEventHandler.js";
-import { ListColorsHandler } from "../handlers/core/ListColorsHandler.js";
-import { CreateEventHandler } from "../handlers/core/CreateEventHandler.js";
-import { CreateEventsHandler } from "../handlers/core/CreateEventsHandler.js";
-import { UpdateEventHandler } from "../handlers/core/UpdateEventHandler.js";
-import { DeleteEventHandler } from "../handlers/core/DeleteEventHandler.js";
-import { FreeBusyEventHandler } from "../handlers/core/FreeBusyEventHandler.js";
-import { GetCurrentTimeHandler } from "../handlers/core/GetCurrentTimeHandler.js";
-import { RespondToEventHandler } from "../handlers/core/RespondToEventHandler.js";
 
 // ============================================================================
 // SHARED VALIDATION PATTERNS
@@ -786,34 +778,6 @@ const READ_ONLY_ANNOTATIONS: ToolAnnotations = {
   openWorldHint: false
 };
 
-const WRITE_NON_DESTRUCTIVE_ANNOTATIONS: ToolAnnotations = {
-  readOnlyHint: false,
-  destructiveHint: false,
-  idempotentHint: false,
-  openWorldHint: false
-};
-
-const WRITE_DESTRUCTIVE_ANNOTATIONS: ToolAnnotations = {
-  readOnlyHint: false,
-  destructiveHint: true,
-  idempotentHint: false,
-  openWorldHint: false
-};
-
-const WRITE_DESTRUCTIVE_IDEMPOTENT_ANNOTATIONS: ToolAnnotations = {
-  readOnlyHint: false,
-  destructiveHint: true,
-  idempotentHint: true,
-  openWorldHint: false
-};
-
-const WRITE_NON_DESTRUCTIVE_IDEMPOTENT_ANNOTATIONS: ToolAnnotations = {
-  readOnlyHint: false,
-  destructiveHint: false,
-  idempotentHint: true,
-  openWorldHint: false
-};
-
 export class ToolRegistry {
   private static extractSchemaShape(schema: z.ZodType<any>): any {
     const schemaAny = schema as any;
@@ -920,70 +884,6 @@ export class ToolRegistry {
       annotations: READ_ONLY_ANNOTATIONS,
       schema: ToolSchemas['get-event'],
       handler: GetEventHandler
-    },
-    {
-      name: "list-colors",
-      title: "List Calendar Colors",
-      description: "List available color IDs and their meanings for calendar events",
-      annotations: READ_ONLY_ANNOTATIONS,
-      schema: ToolSchemas['list-colors'],
-      handler: ListColorsHandler
-    },
-    {
-      name: "create-event",
-      title: "Create Calendar Event",
-      description: "Create a new calendar event.",
-      annotations: WRITE_NON_DESTRUCTIVE_ANNOTATIONS,
-      schema: ToolSchemas['create-event'],
-      handler: CreateEventHandler
-    },
-    {
-      name: "create-events",
-      title: "Create Calendar Events (Bulk)",
-      description: "Create multiple calendar events in bulk. Accepts shared defaults (account, calendarId, timeZone) that apply to all events, with per-event overrides. Skips conflict and duplicate detection for speed.",
-      annotations: WRITE_NON_DESTRUCTIVE_ANNOTATIONS,
-      schema: ToolSchemas['create-events'],
-      handler: CreateEventsHandler
-    },
-    {
-      name: "update-event",
-      title: "Update Calendar Event",
-      description: "Update an existing calendar event with recurring event modification scope support.",
-      annotations: WRITE_DESTRUCTIVE_IDEMPOTENT_ANNOTATIONS,
-      schema: ToolSchemas['update-event'],
-      handler: UpdateEventHandler
-    },
-    {
-      name: "delete-event",
-      title: "Delete Calendar Event",
-      description: "Delete a calendar event.",
-      annotations: WRITE_DESTRUCTIVE_ANNOTATIONS,
-      schema: ToolSchemas['delete-event'],
-      handler: DeleteEventHandler
-    },
-    {
-      name: "get-freebusy",
-      title: "Get Free/Busy",
-      description: "Query free/busy information for calendars. Note: Time range is limited to a maximum of 3 months between timeMin and timeMax.",
-      annotations: READ_ONLY_ANNOTATIONS,
-      schema: ToolSchemas['get-freebusy'],
-      handler: FreeBusyEventHandler
-    },
-    {
-      name: "get-current-time",
-      title: "Get Current Time",
-      description: "Get the current date and time. Call this FIRST before creating, updating, or searching for events to ensure you have accurate date context for scheduling.",
-      annotations: READ_ONLY_ANNOTATIONS,
-      schema: ToolSchemas['get-current-time'],
-      handler: GetCurrentTimeHandler
-    },
-    {
-      name: "respond-to-event",
-      title: "Respond to Event Invitation",
-      description: "Respond to a calendar event invitation with Accept, Decline, Maybe (Tentative), or No Response.",
-      annotations: WRITE_NON_DESTRUCTIVE_IDEMPOTENT_ANNOTATIONS,
-      schema: ToolSchemas['respond-to-event'],
-      handler: RespondToEventHandler
     }
   ];
 
@@ -999,52 +899,12 @@ export class ToolRegistry {
   }
 
   /**
-   * Normalizes datetime fields from object format to string format
-   * Converts { date: "2025-01-01" } or { dateTime: "...", timeZone: "..." } to simple strings
-   * This allows accepting both Google Calendar API format and our simplified format
+   * Normalizes datetime fields from object format to string format.
+   * Readonly-mode: the readonly surface carries no object-form datetime
+   * fields, so this is a pass-through kept for a stable call site.
    */
-  private static normalizeDateTimeFields(toolName: string, args: any): any {
-    // Only normalize for tools that have datetime fields
-    const toolsWithDateTime = ['create-event', 'update-event', 'create-events'];
-    if (!toolsWithDateTime.includes(toolName)) {
-      return args;
-    }
-
-    const normalized = { ...args };
-    const dateTimeFields = ['start', 'end', 'originalStartTime', 'futureStartDate'];
-
-    // Handle nested events array for create-events
-    if (toolName === 'create-events' && Array.isArray(normalized.events)) {
-      normalized.events = normalized.events.map((event: any) => {
-        const normalizedEvent = { ...event };
-        for (const field of dateTimeFields) {
-          if (normalizedEvent[field] && typeof normalizedEvent[field] === 'object') {
-            const obj = normalizedEvent[field];
-            if (obj.date) {
-              normalizedEvent[field] = obj.date;
-            } else if (obj.dateTime) {
-              normalizedEvent[field] = obj.dateTime;
-            }
-          }
-        }
-        return normalizedEvent;
-      });
-      return normalized;
-    }
-
-    for (const field of dateTimeFields) {
-      if (normalized[field] && typeof normalized[field] === 'object') {
-        const obj = normalized[field];
-        // Convert object format to string format
-        if (obj.date) {
-          normalized[field] = obj.date;
-        } else if (obj.dateTime) {
-          normalized[field] = obj.dateTime;
-        }
-      }
-    }
-
-    return normalized;
+  private static normalizeDateTimeFields(_toolName: string, args: any): any {
+    return args;
   }
 
   /**
@@ -1059,11 +919,11 @@ export class ToolRegistry {
    * @throws Error if any tool name is invalid
    */
   static validateToolNames(toolNames: string[]): void {
-    const availableTools = new Set([...this.getAvailableToolNames(), 'manage-accounts']);
+    const availableTools = new Set(this.getAvailableToolNames());
     const invalidTools = toolNames.filter(name => !availableTools.has(name));
 
     if (invalidTools.length > 0) {
-      const available = [...this.getAvailableToolNames(), 'manage-accounts'].join(', ');
+      const available = this.getAvailableToolNames().join(', ');
       throw new Error(
         `Invalid tool name(s): ${invalidTools.join(', ')}. ` +
         `Available tools: ${available}`
