@@ -1,6 +1,8 @@
-# Google Calendar MCP Server
+# Google Calendar MCP Server (readonly fork)
 
-A Model Context Protocol (MCP) server that provides Google Calendar integration for AI assistants like Claude.
+A Model Context Protocol (MCP) server that provides read-only Google Calendar integration for AI assistants like Claude.
+
+> **Readonly-fork status:** this fork exposes exactly four MCP tools — `list-calendars`, `list-events`, `search-events`, `get-event` — and no write, free/busy, color, current-time, or account-management tools. OAuth uses `calendar.events.readonly` only. `list-calendars` / calendar-name resolution / default-timezone calendarList access remains an adoption gate pending fresh-grant validation (not claimed working). The local HTTP account page and standalone auth command are out-of-band consent only, not MCP/model tools. `list-events` and `search-events` require exactly one account and one calendar per request with `pageSize <= 20` / `pageToken` pagination.
 
 <table>
 <tr>
@@ -26,14 +28,10 @@ A Model Context Protocol (MCP) server that provides Google Calendar integration 
 
 ## Features
 
-- **Multi-Account Support**: Connect multiple Google accounts (e.g., work, personal) and query them simultaneously
-- **Multi-Calendar Support**: List events from multiple calendars in a single request
-- **Cross-Account Conflicts**: Detect overlapping events across any combination of calendars
-- **Event Management**: Create, update, delete, and search calendar events
-- **Recurring Events**: Advanced modification capabilities for recurring events
-- **Free/Busy Queries**: Check availability across calendars
-- **Smart Scheduling**: Natural language understanding for dates and times
-- **Intelligent Import**: Add calendar events from images, PDFs, or web links
+- **Read-only event queries**: List, search, and fetch event details from one calendar at a time
+- **Single-account / single-calendar requests**: `list-events` and `search-events` take exactly one account and one `calendarId` (ID or name) per request
+- **Cursor pagination**: `pageSize` (1-20, passed as `maxResults`) and opaque `pageToken` (`nextPageToken` passthrough, one `events.list` call per request, no auto-pagination or merging)
+- **Calendar lookup helper**: `list-calendars` lists known calendars for ID/name resolution (see adoption gate note below)
 
 ## Quick Start
 
@@ -52,8 +50,9 @@ A Model Context Protocol (MCP) server that provides Google Calendar integration 
    - Click "Create Credentials" > "OAuth client ID"
    - Choose "User data" for the type of data that the app will be accessing
    - Add your app name and contact information
-   - Add the following scopes (optional):
-     - `https://www.googleapis.com/auth/calendar.events` and `https://www.googleapis.com/auth/calendar`
+    - Add the following scope:
+      - `https://www.googleapis.com/auth/calendar.events.readonly`
+    - Do not add broader Calendar scopes; this fork requests readonly event access only.
    - Select "Desktop app" as the application type (Important!)
    - Save the auth key, you'll need to add its path to the JSON in the next step
    - Add your email address as a test user under the [Audience screen](https://console.cloud.google.com/auth/audience)
@@ -108,16 +107,15 @@ See the [Docker deployment guide](docs/docker.md) for detailed configuration opt
 
 ### First Run
 
-1. Start Claude Desktop
-2. **Ask Claude to authenticate with the Google Calendar MCP server** (e.g., "Authenticate with Google Calendar"). This step is required before using any calendar tool — without it, requests will fail with a `-32600` error.
-3. Complete the OAuth flow in your browser
-4. You're ready to use calendar features!
+1. Complete consent out of band before using any calendar tool: run the standalone auth command (`npx @cocal/google-calendar-mcp auth` / `npm run auth`) or use the local HTTP account page (see [Managing Accounts](#managing-accounts)).
+2. The local HTTP account UI and standalone auth command are out-of-band consent only — they are not MCP/model tools.
+3. Then start the MCP server and use the four read-only tools. Unauthenticated requests fail; there is no in-chat/MCP authentication or account-management tool.
 
-**Using Claude Code?** The same steps apply — just ask Claude to authenticate with the Google Calendar MCP server from your CLI session before using any calendar tool.
+> **Adoption gate:** `list-calendars`, calendar-name resolution, and default-timezone lookup depend on calendarList access. That access remains an adoption gate pending fresh-grant validation under the readonly scope — availability is not claimed here.
 
 ### Re-authentication
 
-If you're in test mode (default), tokens expire after 7 days. If you are using a client like Claude Desktop it should open up a browser window to automatically re-auth. However, if you see authentication errors you can also resolve by following these steps:
+If you're in test mode (default), tokens expire after 7 days. If you see authentication errors, re-run consent out of band:
 
 **For npx users:**
 ```bash
@@ -137,85 +135,54 @@ npm run auth
 
 See [Authentication Guide](docs/authentication.md#avoiding-token-expiration) for details.
 
-## Managing Multiple Accounts
+## Managing Accounts
 
-Connect multiple Google accounts and use them simultaneously.
+Connect Google accounts out of band; there is no `manage-accounts` MCP/model tool in this fork.
 
-**In chat (recommended):** Use the `manage-accounts` tool to add, list, or remove accounts directly from your AI assistant - no terminal needed. See the [Authentication Guide](docs/authentication.md#managing-multiple-accounts) for details.
+**Standalone auth (out-of-band consent only):** For initial setup, use `npm run account auth <nickname>` (e.g., `npm run account auth work`).
 
-**CLI:** For initial setup, use `npm run account auth <nickname>` (e.g., `npm run account auth work`).
+**HTTP / Docker (out-of-band consent only):** Visit the local HTTP account page to manage accounts in the browser. This is a local consent UI, not an MCP/model tool.
 
-**HTTP / Docker:** Visit `http://localhost:3000/accounts` to manage accounts in the browser.
-
-When no `account` parameter is supplied to a tool, read-only tools merge results from all accounts, while write tools auto-select the account with appropriate permissions.
+`list-events` and `search-events` require exactly one account and one calendar per request. When several accounts are connected, pass `account`; when only one account is connected it may be omitted. There is no multi-account merge and no multi-calendar fan-out in this fork.
 
 ## Example Usage
 
-Along with the normal capabilities you would expect for a calendar integration you can also do really dynamic, multi-step processes like:
+Read-only query examples (single account, single calendar per request):
 
-1. **Cross-calendar availability**:
+1. **List events in a time range**:
    ```
-   Please provide availability looking at both my personal and work calendar for this upcoming week.
-   I am looking for a good time to meet with someone in London for 1 hr.
+   List my work calendar events for this upcoming week.
    ```
 
-2. Add events from screenshots, images and other data sources:
-   ```
-   Add this event to my calendar based on the attached screenshot.
-   ```
-   Supported image formats: PNG, JPEG, GIF
-   Images can contain event details like date, time, location, and description
-
-3. Calendar analysis:
+2. Calendar analysis:
    ```
    What events do I have coming up this week that aren't part of my usual routine?
    ```
-4. Check attendance:
+3. Check attendance:
    ```
    Which events tomorrow have attendees who have not accepted the invitation?
    ```
-5. Respond to invitations:
+4. Search by text:
    ```
-   Accept the team meeting invitation on my calendar for tomorrow at 2pm
+   Search my primary calendar for planning meetings between January 1 and January 31.
    ```
-   Decline with a note:
-   ```
-   Decline the Friday meeting with a note that I have a scheduling conflict
-   ```
-   Respond to recurring events:
-   ```
-   Accept just this week's standup, but keep future instances as tentative
-   ```
-   ```
-   Decline all future Monday planning meetings
-   ```
-6. Auto coordinate events:
-   ```
-   Here's some availability that was provided to me by someone. {available times}
-   Take a look at the times provided and let me know which ones are open on my calendar.
-   ```
+   `list-events` and `search-events` return one page per request; pass through `nextPageToken` as `pageToken` with `pageSize <= 20` for the next page.
 
 ## Available Tools
 
+This fork exposes exactly four MCP tools. There are no create/update/delete, respond, free/busy, color, current-time, or account-management tools.
+
 | Tool | Description |
 |------|-------------|
-| `list-calendars` | List all available calendars |
-| `list-events` | List events with date filtering |
+| `list-calendars` | List known calendars for ID/name resolution (calendarList access remains an adoption gate pending fresh-grant validation) |
+| `list-events` | List events from exactly one account and one calendar; paginated via `pageSize` (1-20) / `pageToken` |
 | `get-event` | Get details of a specific event by ID |
-| `search-events` | Search events by text query |
-| `create-event` | Create new calendar events |
-| `update-event` | Update existing events |
-| `delete-event` | Delete events |
-| `respond-to-event` | Respond to event invitations (Accept, Decline, Maybe, No Response) |
-| `get-freebusy` | Check availability across calendars, including external calendars |
-| `get-current-time` | Get current date and time in calendar's timezone |
-| `list-colors` | List available event colors |
-| `manage-accounts` | Add, list, or remove connected Google accounts |
+| `search-events` | Search events by text query in exactly one account and one calendar over a required time range; paginated via `pageSize` (1-20) / `pageToken` |
 
 ## Documentation
 
 - [Authentication Setup](docs/authentication.md) - Detailed Google Cloud setup
-- [Advanced Usage](docs/advanced-usage.md) - Multi-account, batch operations
+- [Advanced Usage](docs/advanced-usage.md) - Single-account queries, pagination
 - [Deployment Guide](docs/deployment.md) - HTTP transport, remote access
 - [Docker Guide](docs/docker.md) - Docker deployment with stdio and HTTP modes
 - [Architecture](docs/architecture.md) - Technical architecture overview
@@ -240,9 +207,8 @@ Thanks! – Nate
 
 ### Tool Filtering
 
-You can limit which tools are exposed to the AI assistant using the `--enable-tools` flag or `ENABLED_TOOLS` environment variable. This is useful for:
+You can limit which of the four tools are exposed to the AI assistant using the `--enable-tools` flag or `ENABLED_TOOLS` environment variable. This is useful for:
 - **Reducing context usage**: Each tool consumes tokens from the AI's context window. Limiting tools can help preserve context for longer conversations.
-- **Security**: Restrict capabilities to read-only operations or specific functionality.
 - **Simplicity**: Only expose the tools your workflow actually needs.
 
 **Via command line:**
@@ -268,7 +234,7 @@ npx @cocal/google-calendar-mcp start --enable-tools list-calendars,list-events,s
 
 **Available tool names:** `list-calendars`, `list-events`, `search-events`, `get-event`
 
-When tool filtering is active, the server provides instructions to the AI assistant listing which tools are disabled. This allows the AI to inform users that additional functionality exists but is currently unavailable, without consuming the full token cost of those tool schemas.
+When tool filtering is active, only the selected subset of the four tools is registered. Any other name (including upstream write, free/busy, color, current-time, or account-management names) is rejected as an invalid tool name.
 
 If the list is empty or contains only commas, the server will fail to start with an error.
 
