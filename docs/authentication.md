@@ -102,10 +102,14 @@ OAuth tokens are automatically stored in a secure location:
 
 To use a custom location, set:
 ```bash
-export GOOGLE_CALENDAR_MCP_TOKEN_PATH="/custom/path/tokens.json"
+export GOOGLE_CALENDAR_MCP_READONLY_TOKEN_PATH="/custom/path/tokens.json"
 ```
 
+> **Readonly fork note:** this fork intentionally ignores broad-scope upstream token files and requires a fresh OAuth consent into a new readonly token storage location.
+
 ## First-Time Authentication
+
+> **Migration warning:** existing broad-scope tokens are not reused; complete a fresh OAuth consent on first run to create the readonly token storage.
 
 1. Start Claude Desktop after configuration
 2. The server will automatically open your browser for authentication

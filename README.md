@@ -233,7 +233,9 @@ Thanks! – Nate
 
 **Environment Variables:**
 - `GOOGLE_OAUTH_CREDENTIALS` - Path to OAuth credentials file
-- `GOOGLE_CALENDAR_MCP_TOKEN_PATH` - Custom token storage location (optional)
+- `GOOGLE_CALENDAR_MCP_READONLY_TOKEN_PATH` - Custom token storage location (optional)
+
+> **Readonly fork note:** this fork intentionally ignores broad-scope upstream token files and requires a fresh OAuth consent into a new readonly token storage location.
 - `ENABLED_TOOLS` - Comma-separated list of tools to enable (see Tool Filtering below)
 
 ### Tool Filtering
