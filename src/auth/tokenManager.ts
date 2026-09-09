@@ -2,6 +2,7 @@ import { OAuth2Client, Credentials } from 'google-auth-library';
 import fs from 'fs/promises';
 import { getSecureTokenPath, getAccountMode } from './utils.js';
 import { validateAccountId } from './paths.js';
+import { assertValidGrantedScopes, isValidGrantedScopes, INVALID_TOKEN_SCOPES_MESSAGE } from './scopes.js';
 import { GaxiosError } from 'gaxios';
 import { mkdir } from 'fs/promises';
 import { dirname } from 'path';
@@ -209,6 +210,11 @@ export class TokenManager {
         return false;
       }
 
+      if (!isValidGrantedScopes((tokens as Credentials).scope)) {
+        process.stderr.write(`${INVALID_TOKEN_SCOPES_MESSAGE}\n`);
+        return false;
+      }
+
       this.oauth2Client.setCredentials(tokens);
       process.stderr.write(`Loaded tokens for ${this.accountMode} account\n`);
       return true;
@@ -309,6 +315,7 @@ export class TokenManager {
 
   async saveTokens(tokens: Credentials, email?: string): Promise<void> {
     try {
+        assertValidGrantedScopes(tokens?.scope);
         // Wrap entire read-modify-write in the queue to prevent race conditions
         await this.enqueueTokenWrite(async () => {
           const multiAccountTokens = await this.loadMultiAccountTokens();
@@ -417,6 +424,23 @@ export class TokenManager {
     try {
       const multiAccountTokens = await this.loadMultiAccountTokens();
 
+      // Fail closed: any persisted account with missing/broad/extra scopes
+      // rejects the whole file before any setCredentials/client creation.
+      // Never rewrites or deletes the file here; startup stays non-blocking.
+      for (const tokens of Object.values(multiAccountTokens)) {
+        if (!tokens || typeof tokens !== 'object') {
+          continue;
+        }
+        const candidate = tokens as Credentials;
+        if (!candidate.access_token) {
+          continue;
+        }
+        if (!isValidGrantedScopes(candidate.scope)) {
+          process.stderr.write(`${INVALID_TOKEN_SCOPES_MESSAGE}\n`);
+          return new Map();
+        }
+      }
+
       // Remove accounts that no longer exist in token file
       for (const accountId of this.accounts.keys()) {
         if (!multiAccountTokens[accountId]) {
@@ -478,6 +502,9 @@ export class TokenManager {
       }
       // Legacy top-level format is unauthenticated, never blocking startup.
       if (error instanceof Error && error.message === "Legacy token format rejected; re-authentication required") {
+        return new Map();
+      }
+      if (error instanceof Error && error.message === INVALID_TOKEN_SCOPES_MESSAGE) {
         return new Map();
       }
       throw error;

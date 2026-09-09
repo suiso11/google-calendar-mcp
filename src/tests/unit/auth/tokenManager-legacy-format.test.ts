@@ -82,7 +82,13 @@ describe('TokenManager - reject legacy top-level token format', () => {
 
   it('preserves valid multi-account readonly files', async () => {
     mockedFs.readFile.mockResolvedValue(
-      JSON.stringify({ normal: { access_token: 'valid-access', refresh_token: 'valid-refresh' } }),
+      JSON.stringify({
+        normal: {
+          access_token: 'valid-access',
+          refresh_token: 'valid-refresh',
+          scope: 'https://www.googleapis.com/auth/calendar.events.readonly',
+        },
+      }),
     );
     mockedFs.writeFile.mockResolvedValue(undefined);
 
