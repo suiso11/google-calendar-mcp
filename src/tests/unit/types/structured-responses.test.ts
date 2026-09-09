@@ -388,5 +388,45 @@ describe('structured-responses', () => {
         expect(result.endDayOfWeek).toBe('Tuesday');
       });
     });
+
+    describe('etag revision', () => {
+      it('should preserve etag verbatim when present', () => {
+        const event: calendar_v3.Schema$Event = {
+          id: 'test-event-etag',
+          etag: '"1234567890123000"',
+          start: {
+            dateTime: '2026-01-21T10:00:00-08:00',
+            timeZone: 'America/Los_Angeles'
+          },
+          end: {
+            dateTime: '2026-01-21T11:00:00-08:00',
+            timeZone: 'America/Los_Angeles'
+          }
+        };
+
+        const result = convertGoogleEventToStructured(event);
+
+        expect(result.etag).toBe('"1234567890123000"');
+      });
+
+      it('should leave etag undefined when absent', () => {
+        const event: calendar_v3.Schema$Event = {
+          id: 'test-event-no-etag',
+          start: {
+            dateTime: '2026-01-21T10:00:00-08:00',
+            timeZone: 'America/Los_Angeles'
+          },
+          end: {
+            dateTime: '2026-01-21T11:00:00-08:00',
+            timeZone: 'America/Los_Angeles'
+          }
+        };
+
+        const result = convertGoogleEventToStructured(event);
+
+        expect(result.etag).toBeUndefined();
+        expect('etag' in result ? result.etag : undefined).toBeUndefined();
+      });
+    });
   });
 });

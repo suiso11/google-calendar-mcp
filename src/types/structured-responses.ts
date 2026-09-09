@@ -121,6 +121,7 @@ export interface WorkingLocationProperties {
  */
 export interface StructuredEvent {
   id: string;
+  etag?: string;
   summary?: string;
   description?: string;
   location?: string;
@@ -522,6 +523,7 @@ export function convertGoogleEventToStructured(
 ): StructuredEvent {
   return {
     id: event.id || '',
+    etag: event.etag ?? undefined,
     summary: event.summary ?? undefined,
     description: event.description ?? undefined,
     location: event.location ?? undefined,
