@@ -28,10 +28,10 @@ This guide provides detailed instructions for setting up Google OAuth 2.0 authen
      - App name: "Calendar MCP" (or your choice)
      - User support email: Your email
      - Developer contact: Your email
-   - Add scopes:
-     - Click "Add or Remove Scopes"
-     - Add: `https://www.googleapis.com/auth/calendar.events`
-     - Or use the broader scope: `https://www.googleapis.com/auth/calendar`
+    - Add scope:
+      - Click "Add or Remove Scopes"
+      - Add: `https://www.googleapis.com/auth/calendar.events.readonly`
+      - Do not add broader Calendar scopes; this fork requests readonly event access only.
    - Add test users:
      - Add your email address
      - **Important**: Wait 2-3 minutes for test users to propagate
@@ -142,29 +142,9 @@ The server will guide you through the authentication flow again.
 
 ## Managing Multiple Accounts
 
-The server supports connecting multiple Google accounts simultaneously (e.g., "work", "personal", "family").
+Connect Google accounts out of band; there is no `manage-accounts` MCP/model tool in this fork. `list-events` and `search-events` require exactly one account and one calendar per request. There is no multi-account merge and no multi-calendar fan-out.
 
-### Using the manage-accounts Tool (Recommended)
-
-The easiest way to manage accounts is directly from your AI assistant using the `manage-accounts` tool. No terminal or browser required!
-
-**List connected accounts:**
-```
-manage-accounts with action: "list"
-```
-
-**Add a new account:**
-```
-manage-accounts with action: "add", account_id: "work"
-```
-This returns an authentication URL. Click it, sign in with Google, and you're done. The `account_id` is a nickname you choose to identify this account.
-
-**Remove an account:**
-```
-manage-accounts with action: "remove", account_id: "work"
-```
-
-### Using the CLI
+### Using the CLI (out-of-band consent only)
 
 For initial setup or scripting, you can use the command line:
 
@@ -175,9 +155,9 @@ npm run account list           # List all accounts + status
 npm run account clear work     # Remove an account
 ```
 
-### Using the Web UI (HTTP Mode)
+### Using the Web UI (HTTP Mode, out-of-band consent only)
 
-If running in HTTP mode or via Docker, visit `http://localhost:3000/accounts` to manage accounts through a web interface.
+If running in HTTP mode or via Docker, visit `http://localhost:3000/accounts` for out-of-band consent through a local web interface. This is a local consent UI, not an MCP/model tool.
 
 ## Important Notes
 

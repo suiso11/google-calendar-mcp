@@ -182,13 +182,11 @@ This fork exposes exactly four MCP tools. There are no create/update/delete, res
 ## Documentation
 
 - [Authentication Setup](docs/authentication.md) - Detailed Google Cloud setup
-- [Advanced Usage](docs/advanced-usage.md) - Single-account queries, pagination
 - [Deployment Guide](docs/deployment.md) - HTTP transport, remote access
 - [Docker Guide](docs/docker.md) - Docker deployment with stdio and HTTP modes
 - [Architecture](docs/architecture.md) - Technical architecture overview
 - [Development](docs/development.md) - Contributing and testing
-- [Testing](docs/testing.md) - Unit and integration testing guide
-- [Multi-Account Updates](docs/multi-account-updates.md) - Current status and roadmap for multi-account support
+- [Testing](docs/testing.md) - Unit and integration testing guide (read-only live tests)
 
 ## Sponsorship
 

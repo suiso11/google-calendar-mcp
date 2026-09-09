@@ -4,9 +4,9 @@
 
 ```bash
 npm test                 # Unit tests (no auth required)
-npm run test:integration # Direct integration tests only (requires Google auth)
-npm run test:integration:all # All integration tests (direct + multi-account + LLM + docker)
-npm run test:all         # Unit + all integration tests
+npm run test:integration # Direct integration tests only (requires Google auth, read-only)
+npm run test:integration:all # All read-only integration tests (direct + LLM + docker)
+npm run test:all         # Unit + all read-only integration tests
 ```
 
 ## Test Structure
@@ -53,15 +53,13 @@ export TEST_CALENDAR_ID="your-test-calendar-id"
 npm run dev auth:test
 ```
 
-**What these tests do:**
-- ✅ Create, read, update, delete real calendar events
-- ✅ Test multi-calendar operations with batch requests
+**What these tests do (read-only only):**
+- ✅ Read real calendar events via list/search/get
+- ✅ Test single-account, single-calendar queries with cursor pagination (`pageSize` 1-20 / `pageToken`)
 - ✅ Validate timezone handling with actual Google Calendar API
-- ✅ Test recurring event patterns and modifications
-- ✅ Verify free/busy queries and calendar listings
-- ✅ Performance benchmarking with real API latency
+- ✅ Verify read-only calendar listing for ID/name resolution (adoption gate; availability is not claimed)
 
-**⚠️ Warning:** These tests modify real calendar data in your test calendar.
+**Note:** These live tests are read-only. They do not create, update, delete, or respond to events.
 
 ### 2. LLM Integration Tests
 
@@ -83,13 +81,13 @@ export ANTHROPIC_MODEL="claude-3-5-haiku-20241022"  # Default
 export OPENAI_MODEL="gpt-4o-mini"                   # Default
 ```
 
-**What these tests do:**
+**What these tests do (read-only only):**
 - ✅ Test end-to-end MCP protocol integration with Claude
 - ✅ Test end-to-end MCP protocol integration with OpenAI
-- ✅ Validate AI assistant can successfully call calendar tools
-- ✅ Test complex multi-step AI workflows
+- ✅ Validate AI assistant can successfully call the four read-only calendar tools
+- ✅ Test read-only multi-step AI query workflows (single account/calendar per request)
 
-**⚠️ Warning:** These tests consume LLM API credits and modify real calendar data.
+**⚠️ Warning:** These tests consume LLM API credits. They issue read-only calendar queries only and do not modify calendar data.
 
 **Important LLM Compatibility Notes:**
 - **Claude**: Only Claude 3.5+ models support MCP. Earlier models will fail.
@@ -102,9 +100,8 @@ export OPENAI_MODEL="gpt-4o-mini"                   # Default
 # Default integration run (direct tests only; no LLM credits)
 npm run test:integration
 
-# Explicit categories
+# Explicit categories (read-only only)
 npm run test:integration:direct
-npm run test:integration:multi-account
 npm run test:integration:llm
 npm run test:integration:docker
 npm run test:integration:all
@@ -119,22 +116,18 @@ All `test:integration:*` scripts build the project first, so `build/index.js` is
 | Variable | Required For | Purpose | Example |
 |----------|--------------|---------|---------|
 | `GOOGLE_OAUTH_CREDENTIALS` | All integration tests | Path to OAuth credentials file | `./gcp-oauth.keys.json` |
-| `TEST_CALENDAR_ID` | All integration tests | Target calendar for test operations | `test-calendar@gmail.com` or `primary` |
+| `TEST_CALENDAR_ID` | All integration tests | Target calendar for read-only test queries | `test-calendar@gmail.com` or `primary` |
 | `CLAUDE_API_KEY` | Claude integration tests | Anthropic API access | `sk-ant-api03-...` |
 | `OPENAI_API_KEY` | OpenAI integration tests | OpenAI API access | `sk-...` |
-| `INVITEE_1` | Attendee tests | Test attendee email | `test1@example.com` |
-| `INVITEE_2` | Attendee tests | Test attendee email | `test2@example.com` |
 
 ### Optional Environment Variables
 
 | Variable | Purpose | Default | Notes |
 |----------|---------|---------|-------|
-| `GOOGLE_ACCOUNT_MODE` | Default account nickname for auth flows | `normal` | Set to any lowercase nickname (e.g., `work`, `personal`) before running `npm run auth` |
+| `GOOGLE_ACCOUNT_MODE` | Default account nickname for auth flows | `normal` | Set to any lowercase nickname (e.g., `work`) before running `npm run auth` |
 | `DEBUG_LLM_INTERACTIONS` | Debug logging | `false` | Set `true` for verbose LLM logs |
 | `ANTHROPIC_MODEL` | Claude model | `claude-3-5-haiku-20241022` | Must support MCP |
 | `OPENAI_MODEL` | OpenAI model | `gpt-4o-mini` | Must support function calling |
-| `MULTI_ACCOUNT_TESTS` | Enable `multi-account.test.ts` | `false` | Set to `true` to run cross-account integration tests |
-| `MULTI_ACCOUNT_IDS` | Comma-separated account nicknames | _unset_ | Example: `work,personal` (requires tokens for each account) |
 
 ### Complete Setup Example
 
@@ -155,10 +148,6 @@ TEST_CALENDAR_ID=test-calendar@gmail.com
 # Required for LLM integration tests
 CLAUDE_API_KEY=sk-ant-api03-...
 OPENAI_API_KEY=sk-...
-
-# Required for attendee tests
-INVITEE_1=test1@example.com
-INVITEE_2=test2@example.com
 
 # Optional configurations
 GOOGLE_ACCOUNT_MODE=test
@@ -182,15 +171,11 @@ npm run dev account:status
 npm run test:integration:direct
 ```
 
-5. **Run multi-account integration tests (optional):**
+5. **Run read-only integration tests:**
 ```bash
-export MULTI_ACCOUNT_TESTS=true
-export MULTI_ACCOUNT_IDS=work,personal
-npm run test:integration:multi-account
+npm run test:integration:direct
 ```
-These tests verify cross-account list-events merging. Each account listed in `MULTI_ACCOUNT_IDS` must already be authenticated.
-
-> **Tip:** Authenticate multiple accounts with `npm run account auth <nickname>` for each one (e.g., `work`, `personal`). All tokens share the same storage file, so integration tests can switch accounts by passing the `account` parameter.
+Live tests issue single-account, single-calendar read-only queries with cursor pagination. They do not create, update, delete, or respond to events.
 
 
 ## Troubleshooting
@@ -206,8 +191,8 @@ These tests verify cross-account list-events merging. Each account listed in `MU
 **API Errors:**
 - **Rate limits**: Tests include retry logic, but may still hit limits with frequent runs
 - **Calendar not found**: Verify `TEST_CALENDAR_ID` exists and is accessible
-- **Permission denied**: Ensure test account has write access to the calendar
-- **"Invalid time range"**: Free/busy queries limited to 3 months between timeMin and timeMax
+- **Permission denied**: Ensure test account has read access to the calendar
+- **"Invalid time range"**: List/search queries require a bounded time range
 
 **LLM Integration Errors:**
 - **"Invalid API key"**: Check `CLAUDE_API_KEY`/`OPENAI_API_KEY` are set correctly
@@ -221,10 +206,10 @@ These tests verify cross-account list-events merging. Each account listed in `MU
 
 ### Test Data Management
 
-**Calendar Cleanup:**
-- Tests attempt to clean up created events automatically
-- Failed tests may leave test events in your calendar
-- Manually delete events with "Integration Test" or "Test Event" in the title if needed
+**Read-only live tests:**
+- Live tests issue read-only list/search/get queries only
+- No test events are created, so no calendar cleanup is required
+- Use a dedicated test calendar (`TEST_CALENDAR_ID`); don't use your personal calendar for testing
 
 **Test Isolation:**
 - Use a dedicated test calendar (`TEST_CALENDAR_ID`)
@@ -266,27 +251,15 @@ npm run test:integration:direct -- -t "should handle timezone"
 npm run dev
 ```
 
-### Writing New Integration Tests
+### Writing New Integration Tests (read-only only)
 
-1. **Use Test Data Factory:**
+1. **Use read-only queries:**
 ```typescript
-import { TestDataFactory } from './test-data-factory.js';
-
-const factory = new TestDataFactory();
-const testEvent = factory.createTestEvent({
-  summary: 'My Test Event',
-  start: factory.getTomorrowAt(14, 0),
-  end: factory.getTomorrowAt(15, 0)
-});
+// Query one account and one calendar per request; paginate with pageSize/pageToken.
+// Do not create, update, delete, or respond to events in live tests.
 ```
 
-2. **Track Created Events:**
-```typescript
-// Events are automatically tracked for cleanup
-const eventId = TestDataFactory.extractEventIdFromResponse(result);
-```
-
-3. **LLM Context Logging:**
+2. **LLM Context Logging:**
 ```typescript
 // Wrap LLM operations for automatic error logging
 await executeWithContextLogging('Test Name', async () => {
@@ -308,9 +281,8 @@ await executeWithContextLogging('Test Name', async () => {
    - Use smaller/cheaper models for initial testing
 
 3. **Test Data:**
-   - Tests auto-cleanup created events
-   - Use unique event titles with timestamps
-   - Verify cleanup in afterEach hooks
+    - Live tests are read-only; do not create test events
+    - Use a dedicated test calendar, not personal calendar
 
 4. **Debugging Failures:**
    - Check `DEBUG_LLM_INTERACTIONS` output for LLM tests

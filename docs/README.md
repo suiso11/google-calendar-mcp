@@ -5,11 +5,7 @@ Welcome to the Google Calendar MCP Server documentation.
 ## Getting Started
 
 - [Main README](../README.md) - Quick start guide and overview
-- [Authentication Setup](authentication.md) - Detailed Google Cloud setup instructions
-
-## User Guides
-
-- [Advanced Usage](advanced-usage.md) - Multi-account, batch operations, smart scheduling
+- [Authentication Setup](authentication.md) - Detailed Google Cloud setup instructions (readonly scope, out-of-band consent)
 
 ## Deployment
 
@@ -31,7 +27,6 @@ Welcome to the Google Calendar MCP Server documentation.
 ### For Users
 1. Start with the [Main README](../README.md)
 2. Follow [Authentication Setup](authentication.md)
-3. See [Advanced Usage](advanced-usage.md) for multi-account and batch operations
 
 ### For Developers
 1. Read [Architecture Overview](architecture.md)
