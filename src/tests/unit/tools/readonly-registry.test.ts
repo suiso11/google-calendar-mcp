@@ -92,4 +92,32 @@ describe('Readonly tool surface', () => {
       expect([ListCalendarsHandler, ListEventsHandler, SearchEventsHandler, GetEventHandler]).toContain(tool.handler);
     }
   });
+
+  it('should preserve fractional bounds through the actual registered SDK callback (inert provider)', async () => {
+    const callbacks = new Map<string, (args: any) => Promise<any>>();
+    mockServer.registerTool = vi.fn((name: string, _definition: any, cb: any) => {
+      callbacks.set(name, cb);
+      registeredTools.push({ name });
+      return { name } as any;
+    });
+    let seenArgs: any = null;
+    await ToolRegistry.registerAll(mockServer, async (_handler: any, args: any) => {
+      seenArgs = args;
+      return { content: [] };
+    });
+
+    // list-events: schema.parse + handlerFunction path with fractional explicit bounds
+    const listCb = callbacks.get('list-events')!;
+    const timeMin = '2026-01-01T00:00:00.123456789+09:00';
+    const timeMax = '2026-01-31T23:59:59.999999999Z';
+    await listCb({ calendarId: 'primary', timeMin, timeMax });
+    expect(seenArgs.timeMin).toBe(timeMin);
+    expect(seenArgs.timeMax).toBe(timeMax);
+
+    // search-events: schema.parse path with .1 fractional Z bounds
+    const searchCb = callbacks.get('search-events')!;
+    await searchCb({ calendarId: 'primary', timeMin: '2026-01-01T00:00:00.1Z', timeMax: '2026-01-31T23:59:59.1Z' });
+    expect(seenArgs.timeMin).toBe('2026-01-01T00:00:00.1Z');
+    expect(seenArgs.timeMax).toBe('2026-01-31T23:59:59.1Z');
+  });
 });

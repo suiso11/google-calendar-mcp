@@ -388,4 +388,40 @@ describe('ListEventsHandler - Timezone Handling', () => {
       });
     });
   });
+
+  describe('Fractional seconds provider bounds (byte-for-byte)', () => {
+    beforeEach(() => {
+      mockCalendar.calendarList.get.mockResolvedValue({ data: { timeZone: 'UTC' } });
+      mockCalendar.events.list.mockResolvedValue({ data: { items: [] } });
+    });
+
+    it('should forward explicit-offset fractional bounds to events.list unchanged', async () => {
+      const timeMin = '2026-01-01T00:00:00.123456789+09:00';
+      const timeMax = '2026-01-31T23:59:59.999999999Z';
+      await handler.runTool({ calendarId: 'primary', timeMin, timeMax }, mockAccounts);
+      const callArgs = mockCalendar.events.list.mock.calls[0][0];
+      expect(callArgs.timeMin).toBe(timeMin);
+      expect(callArgs.timeMax).toBe(timeMax);
+    });
+
+    it('should forward .1 fractional Z bounds without truncation', async () => {
+      const timeMin = '2026-01-01T00:00:00.1Z';
+      const timeMax = '2026-01-31T23:59:59.1Z';
+      await handler.runTool({ calendarId: 'primary', timeMin, timeMax }, mockAccounts);
+      const callArgs = mockCalendar.events.list.mock.calls[0][0];
+      expect(callArgs.timeMin).toBe(timeMin);
+      expect(callArgs.timeMax).toBe(timeMax);
+    });
+
+    it('should preserve naive fraction digits through UTC fallback conversion', async () => {
+      await handler.runTool({
+        calendarId: 'primary',
+        timeMin: '2026-01-01T00:00:00.123456',
+        timeMax: '2026-01-31T23:59:59.999999999',
+      }, mockAccounts);
+      const callArgs = mockCalendar.events.list.mock.calls[0][0];
+      expect(callArgs.timeMin).toBe('2026-01-01T00:00:00.123456Z');
+      expect(callArgs.timeMax).toBe('2026-01-31T23:59:59.999999999Z');
+    });
+  });
 });

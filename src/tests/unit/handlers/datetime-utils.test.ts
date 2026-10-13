@@ -13,6 +13,17 @@ describe('Datetime Utilities', () => {
       expect(hasTimezoneInDatetime('2024-01-01T10:00:00')).toBe(false);
       expect(hasTimezoneInDatetime('2024-01-01 10:00:00')).toBe(false);
     });
+
+    it('should return true for fractional datetimes with explicit offset (byte-for-byte)', () => {
+      expect(hasTimezoneInDatetime('2026-01-01T00:00:00.1Z')).toBe(true);
+      expect(hasTimezoneInDatetime('2026-01-01T00:00:00.123456+09:00')).toBe(true);
+      expect(hasTimezoneInDatetime('2026-01-01T00:00:00.999999999-05:00')).toBe(true);
+      expect(hasTimezoneInDatetime('2026-01-01T00:00:00.123456789012+09:00')).toBe(true);
+    });
+
+    it('should return false for naive fractional datetimes (still need fallback conversion)', () => {
+      expect(hasTimezoneInDatetime('2026-01-01T00:00:00.123456')).toBe(false);
+    });
   });
 
   describe('convertToRFC3339', () => {
@@ -41,6 +52,29 @@ describe('Datetime Utilities', () => {
       
       // Should fallback to UTC
       expect(result).toBe('2024-01-01T10:00:00Z');
+    });
+
+    it('should return fractional explicit-offset datetimes byte-for-byte (no truncation)', () => {
+      const cases = [
+        '2026-01-01T00:00:00.1Z',
+        '2026-01-01T00:00:00.123456Z',
+        '2026-01-01T00:00:00.999999999Z',
+        '2026-01-01T00:00:00.123456789+09:00',
+        '2026-01-01T00:00:00.5-05:00',
+      ];
+      for (const datetime of cases) {
+        expect(convertToRFC3339(datetime, 'America/Los_Angeles')).toBe(datetime);
+      }
+    });
+
+    it('should preserve naive fraction digits through fallback-timezone conversion', () => {
+      // UTC: whole-second conversion is identity, fraction reattached verbatim
+      expect(convertToRFC3339('2024-06-15T14:30:00.123456', 'UTC')).toBe('2024-06-15T14:30:00.123456Z');
+      // DST-sensitive zone: fractional result equals whole-second conversion + same fraction
+      const whole = convertToRFC3339('2025-07-01T10:00:00', 'America/Los_Angeles');
+      const frac = convertToRFC3339('2025-07-01T10:00:00.999999999', 'America/Los_Angeles');
+      expect(whole).toBe('2025-07-01T17:00:00Z');
+      expect(frac).toBe('2025-07-01T17:00:00.999999999Z');
     });
   });
 

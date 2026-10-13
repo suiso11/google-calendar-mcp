@@ -213,4 +213,24 @@ describe('SearchEventsHandler single-calendar pagination', () => {
     });
     await expect(handler.runTool({ ...baseArgs, query: 'Meeting' }, mockAccounts)).rejects.toThrow('Bad Request');
   });
+
+  describe('Fractional seconds provider bounds (byte-for-byte)', () => {
+    it('should forward explicit-offset fractional bounds to events.list unchanged', async () => {
+      const timeMin = '2026-01-01T00:00:00.123456789+09:00';
+      const timeMax = '2026-01-31T23:59:59.999999999Z';
+      await handler.runTool({ ...baseArgs, query: 'Team', timeMin, timeMax }, mockAccounts);
+      const callArgs = mockCalendar.events.list.mock.calls[0][0];
+      expect(callArgs.timeMin).toBe(timeMin);
+      expect(callArgs.timeMax).toBe(timeMax);
+    });
+
+    it('should forward negative-offset fractional bounds without reconstruction', async () => {
+      const timeMin = '2026-01-01T00:00:00.5-05:00';
+      const timeMax = '2026-01-31T23:59:59.123456-05:00';
+      await handler.runTool({ ...baseArgs, query: 'Team', timeMin, timeMax }, mockAccounts);
+      const callArgs = mockCalendar.events.list.mock.calls[0][0];
+      expect(callArgs.timeMin).toBe(timeMin);
+      expect(callArgs.timeMax).toBe(timeMax);
+    });
+  });
 });

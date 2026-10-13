@@ -108,4 +108,26 @@ describe('search-events Registration Flow (Schema)', () => {
       expect(ToolSchemas['search-events'].safeParse({ ...base, pageToken: 'a'.repeat(2049) }).success).toBe(false);
     });
   });
+
+  describe('Fractional seconds compatibility (Companion byte-for-byte bounds)', () => {
+    const base = {
+      calendarId: 'primary',
+      timeMin: '2024-01-01T00:00:00',
+      timeMax: '2024-01-02T00:00:00'
+    };
+    const cases = [
+      ['2026-01-01T00:00:00.1Z', '2026-01-31T23:59:59.1Z'],
+      ['2026-01-01T00:00:00.123456Z', '2026-01-31T23:59:59.123456Z'],
+      ['2026-01-01T00:00:00.999999999Z', '2026-01-31T23:59:59.999999999Z'],
+      ['2026-01-01T00:00:00.123456789+09:00', '2026-01-31T23:59:59.999999999+09:00'],
+      ['2026-01-01T00:00:00.5-05:00', '2026-01-31T23:59:59.5-05:00'],
+    ] as const;
+
+    it.each(cases)('should accept fractional bounds %s / %s', (timeMin, timeMax) => {
+      const result = ToolSchemas['search-events'].safeParse({ ...base, timeMin, timeMax });
+      expect(result.success).toBe(true);
+      expect(result.data?.timeMin).toBe(timeMin);
+      expect(result.data?.timeMax).toBe(timeMax);
+    });
+  });
 });

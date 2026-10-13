@@ -17,9 +17,9 @@ import { GetEventHandler } from "../handlers/core/GetEventHandler.js";
 // Note: We use validation functions instead of shared schemas to avoid $ref
 // generation in JSON schema output, which can cause issues with some MCP clients.
 
-// ISO 8601 datetime regex patterns
-const ISO_DATETIME_WITH_TZ = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(Z|[+-]\d{2}:\d{2})$/;
-const ISO_DATETIME_WITHOUT_TZ = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/;
+// ISO 8601 datetime regex patterns (optional decimal fraction preserves Companion byte-for-byte bounds)
+const ISO_DATETIME_WITH_TZ = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$/;
+const ISO_DATETIME_WITHOUT_TZ = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?$/;
 const ISO_DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
 
 // Validation functions
