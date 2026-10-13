@@ -2,7 +2,7 @@
 
 A Model Context Protocol (MCP) server that provides read-only Google Calendar integration for AI assistants like Claude.
 
-> **Readonly-fork status:** this fork exposes exactly four MCP tools — `list-calendars`, `list-events`, `search-events`, `get-event` — and no write, free/busy, color, current-time, or account-management tools. OAuth uses `calendar.events.readonly` only. `list-calendars` / calendar-name resolution / default-timezone calendarList access remains an adoption gate pending fresh-grant validation (not claimed working). The local HTTP account page and standalone auth command are out-of-band consent only, not MCP/model tools. `list-events` and `search-events` require exactly one account and one calendar per request with `pageSize <= 20` / `pageToken` pagination.
+> **Readonly-fork status:** this fork exposes exactly three MCP tools — `list-events`, `search-events`, `get-event` — and no write, free/busy, color, current-time, calendar-listing, or account-management tools. OAuth uses `calendar.events.readonly` only. Every request takes an exact calendar ID (`primary`, an email, or an opaque calendar ID) forwarded verbatim — calendar names are not resolved and no calendarList/calendars metadata is fetched on the MCP path. Timezone-naive bounds use the explicit `timeZone` when given, else deterministic UTC. Accounts are provisioned out of band only (standalone auth command or local HTTP account page), which is consent plumbing, not an MCP read capability. `list-events` and `search-events` require exactly one account and one calendar per request with `pageSize <= 20` / `pageToken` pagination.
 
 <table>
 <tr>
@@ -29,9 +29,9 @@ A Model Context Protocol (MCP) server that provides read-only Google Calendar in
 ## Features
 
 - **Read-only event queries**: List, search, and fetch event details from one calendar at a time
-- **Single-account / single-calendar requests**: `list-events` and `search-events` take exactly one account and one `calendarId` (ID or name) per request
+- **Single-account / single-calendar requests**: `list-events` and `search-events` take exactly one account and one exact `calendarId` per request (forwarded verbatim; names are not resolved)
 - **Cursor pagination**: `pageSize` (1-20, passed as `maxResults`) and opaque `pageToken` (`nextPageToken` passthrough, one `events.list` call per request, no auto-pagination or merging)
-- **Calendar lookup helper**: `list-calendars` lists known calendars for ID/name resolution (see adoption gate note below)
+- **Zero MCP-path metadata**: no `calendarList`/`calendars` fetches on any tool call; timezone-naive bounds use the explicit `timeZone` or deterministic UTC
 
 ## Quick Start
 
@@ -109,9 +109,9 @@ See the [Docker deployment guide](docs/docker.md) for detailed configuration opt
 
 1. Complete consent out of band before using any calendar tool: run the standalone auth command (`npx @cocal/google-calendar-mcp auth` / `npm run auth`) or use the local HTTP account page (see [Managing Accounts](#managing-accounts)).
 2. The local HTTP account UI and standalone auth command are out-of-band consent only — they are not MCP/model tools.
-3. Then start the MCP server and use the four read-only tools. Unauthenticated requests fail; there is no in-chat/MCP authentication or account-management tool.
+3. Then start the MCP server and use the three read-only tools. Unauthenticated requests fail; there is no in-chat/MCP authentication, account-management, or calendar-listing tool. Pass exact calendar IDs — there is no name lookup; find the ID in Google Calendar settings (or your existing configuration).
 
-> **Adoption gate:** `list-calendars`, calendar-name resolution, and default-timezone lookup depend on calendarList access. That access remains an adoption gate pending fresh-grant validation under the readonly scope — availability is not claimed here.
+> **Scope note:** no MCP tool in this fork fetches calendar metadata (`calendarList`/`calendars`). The out-of-band account provisioning flow keeps its own consent plumbing; that is not an MCP read capability and its availability is not claimed here.
 
 ### Re-authentication
 
@@ -170,14 +170,13 @@ Read-only query examples (single account, single calendar per request):
 
 ## Available Tools
 
-This fork exposes exactly four MCP tools. There are no create/update/delete, respond, free/busy, color, current-time, or account-management tools.
+This fork exposes exactly three MCP tools. There are no create/update/delete, respond, free/busy, color, current-time, calendar-listing, or account-management tools. `list-calendars` is not registered: any request for it (or any other non-approved name) is rejected.
 
 | Tool | Description |
 |------|-------------|
-| `list-calendars` | List known calendars for ID/name resolution (calendarList access remains an adoption gate pending fresh-grant validation) |
-| `list-events` | List events from exactly one account and one calendar; paginated via `pageSize` (1-20) / `pageToken` |
-| `get-event` | Get details of a specific event by ID |
-| `search-events` | Search events by text query in exactly one account and one calendar over a required time range; paginated via `pageSize` (1-20) / `pageToken` |
+| `list-events` | List events from exactly one account and one exact calendar ID; paginated via `pageSize` (1-20) / `pageToken` |
+| `get-event` | Get details of a specific event by exact calendar ID and event ID |
+| `search-events` | Search events by text query in exactly one account and one exact calendar ID over a required time range; paginated via `pageSize` (1-20) / `pageToken` |
 
 ## Documentation
 
@@ -205,13 +204,13 @@ Thanks! – Nate
 
 ### Tool Filtering
 
-You can limit which of the four tools are exposed to the AI assistant using the `--enable-tools` flag or `ENABLED_TOOLS` environment variable. This is useful for:
+You can limit which of the three tools are exposed to the AI assistant using the `--enable-tools` flag or `ENABLED_TOOLS` environment variable. This is useful for:
 - **Reducing context usage**: Each tool consumes tokens from the AI's context window. Limiting tools can help preserve context for longer conversations.
 - **Simplicity**: Only expose the tools your workflow actually needs.
 
 **Via command line:**
 ```bash
-npx @cocal/google-calendar-mcp start --enable-tools list-calendars,list-events,search-events,get-event
+npx @cocal/google-calendar-mcp start --enable-tools list-events,search-events,get-event
 ```
 
 **Via environment variable in Claude Desktop config:**
@@ -223,16 +222,16 @@ npx @cocal/google-calendar-mcp start --enable-tools list-calendars,list-events,s
       "args": ["@cocal/google-calendar-mcp"],
       "env": {
         "GOOGLE_OAUTH_CREDENTIALS": "/path/to/credentials.json",
-        "ENABLED_TOOLS": "list-calendars,list-events,search-events,get-event"
+        "ENABLED_TOOLS": "list-events,search-events,get-event"
       }
     }
   }
 }
 ```
 
-**Available tool names:** `list-calendars`, `list-events`, `search-events`, `get-event`
+**Available tool names:** `list-events`, `search-events`, `get-event`
 
-When tool filtering is active, only the selected subset of the four tools is registered. Any other name (including upstream write, free/busy, color, current-time, or account-management names) is rejected as an invalid tool name.
+When tool filtering is active, only the selected subset of the three tools is registered. Any other name (including `list-calendars` and upstream write, free/busy, color, current-time, or account-management names) is rejected as an invalid tool name.
 
 If the list is empty or contains only commas, the server will fail to start with an error.
 

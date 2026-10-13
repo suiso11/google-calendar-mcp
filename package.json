@@ -1,6 +1,6 @@
 {
   "name": "@cocal/google-calendar-mcp",
-  "version": "3.0.0-readonly.1",
+  "version": "3.0.0-readonly.2",
   "description": "readonly Companion Calendar MCP fork",
   "type": "module",
   "main": "build/index.js",
