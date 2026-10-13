@@ -1,7 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { GetEventHandler } from '../../../handlers/core/GetEventHandler.js';
 import { OAuth2Client } from 'google-auth-library';
-import { CalendarRegistry } from '../../../services/CalendarRegistry.js';
 
 // Mock the googleapis module
 vi.mock('googleapis', () => ({
@@ -30,9 +29,6 @@ describe('GetEventHandler', () => {
   let mockCalendar: any;
 
   beforeEach(() => {
-    // Reset the singleton to get a fresh instance for each test
-    CalendarRegistry.resetInstance();
-
     handler = new GetEventHandler();
     mockOAuth2Client = new OAuth2Client();
     mockAccounts = new Map([['test', mockOAuth2Client]]);
@@ -44,16 +40,8 @@ describe('GetEventHandler', () => {
       }
     };
 
-    // Mock the getCalendar method
+    // Mock the getCalendar method (inert provider: events only, no metadata surface)
     vi.spyOn(handler as any, 'getCalendar').mockReturnValue(mockCalendar);
-
-    // Mock getClientWithAutoSelection to return the test account
-    vi.spyOn(handler as any, 'getClientWithAutoSelection').mockResolvedValue({
-      client: mockOAuth2Client,
-      accountId: 'test',
-      calendarId: 'primary',
-      wasAutoSelected: true
-    });
   });
 
   describe('runTool', () => {
@@ -85,6 +73,75 @@ describe('GetEventHandler', () => {
       expect(response.event).toBeDefined();
       expect(response.event.id).toBe('event123');
       expect(response.event.summary).toBe('Test Event');
+    });
+
+    it('should forward opaque and email calendar IDs byte-for-byte', async () => {
+      mockCalendar.events.get.mockResolvedValue({
+        data: { id: 'e1', summary: 'x', start: { dateTime: '2025-01-15T10:00:00Z' }, end: { dateTime: '2025-01-15T11:00:00Z' } }
+      });
+
+      for (const calendarId of ['primary', 'user@gmail.com', 'opaque-calendar-id_123']) {
+        mockCalendar.events.get.mockClear();
+        await handler.runTool({ calendarId, eventId: 'e1' }, mockAccounts);
+        expect(mockCalendar.events.get).toHaveBeenCalledTimes(1);
+        expect(mockCalendar.events.get).toHaveBeenCalledWith({
+          calendarId,
+          eventId: 'e1'
+        });
+      }
+    });
+
+    it('should forward name-like calendar IDs verbatim with no resolution', async () => {
+      mockCalendar.events.get.mockResolvedValue({
+        data: { id: 'e1', summary: 'x', start: { dateTime: '2025-01-15T10:00:00Z' }, end: { dateTime: '2025-01-15T11:00:00Z' } }
+      });
+
+      await handler.runTool({ calendarId: 'Work Calendar', eventId: 'e1' }, mockAccounts);
+      expect(mockCalendar.events.get).toHaveBeenCalledWith({
+        calendarId: 'Work Calendar',
+        eventId: 'e1'
+      });
+    });
+
+    it('should select the explicitly requested account client', async () => {
+      const workClient = new OAuth2Client();
+      const personalClient = new OAuth2Client();
+      const multi = new Map<string, OAuth2Client>([
+        ['work', workClient],
+        ['personal', personalClient]
+      ]);
+      const workCalendar = { events: { get: vi.fn().mockResolvedValue({ data: { id: 'e1', summary: 'w' } }) } };
+      const personalCalendar = { events: { get: vi.fn().mockResolvedValue({ data: { id: 'e1', summary: 'p' } }) } };
+      vi.spyOn(handler as any, 'getCalendar').mockImplementation((client: OAuth2Client) =>
+        client === personalClient ? personalCalendar : workCalendar
+      );
+
+      const result = await handler.runTool(
+        { calendarId: 'primary', eventId: 'e1', account: 'personal' },
+        multi
+      );
+      expect(personalCalendar.events.get).toHaveBeenCalledTimes(1);
+      expect(workCalendar.events.get).not.toHaveBeenCalled();
+      const response = JSON.parse(result.content[0].text);
+      expect(response.event.accountId).toBe('personal');
+    });
+
+    it('should reject ambiguous accounts before any provider I/O', async () => {
+      const multi = new Map<string, OAuth2Client>([
+        ['work', new OAuth2Client()],
+        ['personal', new OAuth2Client()]
+      ]);
+      await expect(
+        handler.runTool({ calendarId: 'primary', eventId: 'e1' }, multi)
+      ).rejects.toThrow(/exactly one account/i);
+      expect(mockCalendar.events.get).not.toHaveBeenCalled();
+    });
+
+    it('should reject unknown accounts before any provider I/O', async () => {
+      await expect(
+        handler.runTool({ calendarId: 'primary', eventId: 'e1', account: 'nope' }, mockAccounts)
+      ).rejects.toThrow(/not found/i);
+      expect(mockCalendar.events.get).not.toHaveBeenCalled();
     });
 
     it('should retrieve an event with custom fields', async () => {

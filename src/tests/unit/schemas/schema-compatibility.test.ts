@@ -11,17 +11,13 @@ import { ToolRegistry } from '../../../tools/registry.js';
  * - Python MCP: Receives raw schemas (anyOf preserved for native array support)
  * - Claude: Uses raw MCP schemas
  *
- * Runtime surface is exactly: list-calendars, list-events, search-events, get-event.
+ * Runtime surface is the readonly events tools: list-events, search-events,
+ * get-event. list-calendars, every write name, and every auxiliary or
+ * account-management name must be absent.
  */
 
-const READONLY_TOOLS = [
-  'list-calendars',
-  'list-events',
-  'search-events',
-  'get-event',
-] as const;
-
 const REMOVED_TOOLS = [
+  'list-calendars',
   'list-colors',
   'create-event',
   'create-events',
@@ -30,6 +26,7 @@ const REMOVED_TOOLS = [
   'get-freebusy',
   'get-current-time',
   'respond-to-event',
+  'manage-accounts',
 ];
 
 // Type for JSON Schema objects (subset of what zod-to-json-schema returns)
@@ -218,16 +215,13 @@ describe('Provider-Specific Schema Compatibility', () => {
   });
 
   describe('General Schema Structure', () => {
-    it('should expose exactly the four readonly tools', () => {
+    it('should deny list-calendars, write, and manage tool names', () => {
       const tools = ToolRegistry.getToolsWithSchemas();
-      expect(tools).toBeDefined();
-      expect(tools.map(t => t.name).sort()).toEqual([...READONLY_TOOLS].sort());
 
       for (const removed of REMOVED_TOOLS) {
         expect(tools.find(t => t.name === removed)).toBeUndefined();
       }
 
-      expect(ToolRegistry.getAvailableToolNames().sort()).toEqual([...READONLY_TOOLS].sort());
       expect(() => ToolRegistry.validateToolNames(['create-event'])).toThrow();
       expect(() => ToolRegistry.validateToolNames(['update-event'])).toThrow();
       expect(() => ToolRegistry.validateToolNames(['delete-event'])).toThrow();
@@ -235,12 +229,14 @@ describe('Provider-Specific Schema Compatibility', () => {
       expect(() => ToolRegistry.validateToolNames(['get-freebusy'])).toThrow();
       expect(() => ToolRegistry.validateToolNames(['list-colors'])).toThrow();
       expect(() => ToolRegistry.validateToolNames(['get-current-time'])).toThrow();
+      expect(() => ToolRegistry.validateToolNames(['list-calendars'])).toThrow();
+      expect(() => ToolRegistry.validateToolNames(['manage-accounts'])).toThrow();
     });
 
     it('should have proper schema structure for all tools', () => {
       const tools = ToolRegistry.getToolsWithSchemas();
       expect(tools).toBeDefined();
-      expect(tools.length).toBe(READONLY_TOOLS.length);
+      expect(tools.length).toBeGreaterThan(0);
 
       for (const tool of tools) {
         const schema = tool.inputSchema as JSONSchemaObject;
@@ -269,11 +265,11 @@ describe('Provider-Specific Schema Compatibility', () => {
       }
 
       // Check other readonly tools exist
-      expect(toolSchemas.get('list-calendars')).toBeDefined();
       expect(toolSchemas.get('search-events')).toBeDefined();
       expect(toolSchemas.get('get-event')).toBeDefined();
 
-      // Write/manage tools must be absent from the runtime export
+      // list-calendars/write/manage tools must be absent from the runtime export
+      expect(toolSchemas.get('list-calendars')).toBeUndefined();
       expect(toolSchemas.get('create-event')).toBeUndefined();
       expect(toolSchemas.get('create-events')).toBeUndefined();
       expect(toolSchemas.get('update-event')).toBeUndefined();

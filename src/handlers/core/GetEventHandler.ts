@@ -1,4 +1,4 @@
-import { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import { CallToolResult, McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 import { OAuth2Client } from "google-auth-library";
 import { BaseToolHandler } from "./BaseToolHandler.js";
 import { calendar_v3 } from 'googleapis';
@@ -15,28 +15,56 @@ interface GetEventArgs {
 
 export class GetEventHandler extends BaseToolHandler {
     async runTool(args: GetEventArgs, accounts: Map<string, OAuth2Client>): Promise<CallToolResult> {
-        const validArgs = args;
+        // No accounts available
+        if (accounts.size === 0) {
+            throw new McpError(
+                ErrorCode.InvalidRequest,
+                'No authenticated accounts available. Please run authentication first.'
+            );
+        }
 
-        // Get OAuth2Client with automatic account selection for read operations
-        // Also resolves calendar name to ID if a name was provided
-        const { client: oauth2Client, accountId: selectedAccountId, calendarId: resolvedCalendarId } = await this.getClientWithAutoSelection(
-            args.account,
-            validArgs.calendarId,
-            accounts,
-            'read'
-        );
+        // Exactly one account: explicit normalized ID, or the sole configured key.
+        // Rejects (invalid account / multi-account ambiguity) before any provider I/O.
+        let accountId: string;
+        let oauth2Client: OAuth2Client;
+        if (args.account) {
+            oauth2Client = this.getClientForAccount(args.account, accounts);
+            accountId = args.account.toLowerCase();
+        } else {
+            if (accounts.size !== 1) {
+                const available = Array.from(accounts.keys()).join(', ');
+                throw new McpError(
+                    ErrorCode.InvalidRequest,
+                    `get-event requires exactly one account. Multiple accounts available (${available}). Specify the 'account' parameter.`
+                );
+            }
+            const entry = Array.from(accounts.entries())[0];
+            accountId = entry[0];
+            oauth2Client = entry[1];
+        }
+
+        // Exact configured calendarId is opaque: forwarded byte-for-byte with no
+        // name resolution and no calendarList/calendars metadata I/O.
+        const rawCalendarId = args.calendarId as unknown;
+        if (typeof rawCalendarId !== 'string' || rawCalendarId.length === 0) {
+            throw new McpError(
+                ErrorCode.InvalidRequest,
+                'get-event requires exactly one non-empty calendarId string.'
+            );
+        }
+        const resolvedCalendarId = rawCalendarId;
 
         try {
-            // Get the event with resolved calendar ID
-            const argsWithResolvedCalendar = { ...validArgs, calendarId: resolvedCalendarId };
+            // Get the event with the exact calendar ID
+            const argsWithResolvedCalendar = { ...args, calendarId: resolvedCalendarId };
             const event = await this.getEvent(oauth2Client, argsWithResolvedCalendar);
 
             if (!event) {
-                throw new Error(`Event with ID '${validArgs.eventId}' not found in calendar '${resolvedCalendarId}'.`);
+                throw new Error(`Event with ID '${args.eventId}' not found in calendar '${resolvedCalendarId}'.`);
             }
 
             const response: GetEventResponse = {
-                event: convertGoogleEventToStructured(event, resolvedCalendarId, selectedAccountId)
+                event: convertGoogleEventToStructured(event, resolvedCalendarId, accountId)
             };
 
             return createStructuredResponse(response);

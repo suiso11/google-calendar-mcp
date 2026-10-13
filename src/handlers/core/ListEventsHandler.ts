@@ -2,6 +2,7 @@ import { CallToolResult, McpError, ErrorCode } from "@modelcontextprotocol/sdk/t
 import { OAuth2Client } from "google-auth-library";
 import { BaseToolHandler } from "./BaseToolHandler.js";
 import { buildListFieldMask } from "../../utils/field-mask-builder.js";
+import { convertToRFC3339 } from "../../utils/datetime.js";
 import { createStructuredResponse } from "../../utils/response-builder.js";
 import { ListEventsResponse, StructuredEvent, convertGoogleEventToStructured } from "../../types/structured-responses.js";
 
@@ -62,14 +63,17 @@ export class ListEventsHandler extends BaseToolHandler {
             );
         }
 
-        // Resolve exactly that one calendar (ID passthrough or single name lookup).
-        const calendarId = await this.resolveCalendarId(client, rawCalendarId);
+        // Exact configured calendarId is opaque: forwarded byte-for-byte with no
+        // name resolution and no calendarList/calendars metadata I/O.
+        const calendarId = rawCalendarId;
         const calendar = this.getCalendar(client);
 
-        // Normalize time range to RFC3339 format using calendar's timezone as fallback.
-        const { timeMin, timeMax } = await this.normalizeTimeRange(
-            client, calendarId, args.timeMin, args.timeMax, args.timeZone
-        );
+        // Timezone precedence: explicit timeZone, else deterministic UTC.
+        // No calendar metadata lookup; naive bounds convert via convertToRFC3339
+        // (explicit-offset/fractional inputs pass through byte-for-byte).
+        const timezone = args.timeZone || 'UTC';
+        const timeMin = args.timeMin ? convertToRFC3339(args.timeMin, timezone) : undefined;
+        const timeMax = args.timeMax ? convertToRFC3339(args.timeMax, timezone) : undefined;
 
         const fieldMask = buildListFieldMask(args.fields);
 
