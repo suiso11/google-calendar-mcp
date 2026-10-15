@@ -53,3 +53,27 @@ tests (tests inject a loopback fixture ONLY through
 - `npm run build` then stdio smoke of `build/reschedule-cli.js` against a
   loopback fixture (see Companion Harness acceptance notes; no live
   Google, no OAuth activation).
+
+## Review hardening (fork PR3 review 5532918829, implemented as ground truth)
+
+- Wildcard/list/stale etags never dispatch: `expectedEtag` must be an exact
+  candidate (no `*`, no `,`) AND equal the just-read `current.etag`, checked
+  in the server AND in the provider (direct calls safe). The approved etag
+  still rides `If-Match` verbatim, so a GET→PATCH race is proven by HTTP 412
+  (definite `etag_mismatch`, no apply, no resend).
+- Strict calendar dates: `isStrictCalendarInstant` enforces month lengths,
+  leap years, time/offset ranges (no `Date.parse` rollover — `2023-02-30`
+  rejected); valid leap/fraction/offset instants and `start < end` preserved.
+- Least privilege: any broad `.../auth/calendar` token in the scope string
+  refuses the whole credential (startup AND refresh response, same
+  `validateWriteCredential`); a refused refresh persists no token file.
+- Preflight GET 429/500 keeps the redacted definite `read_upstream_error`
+  (0 PATCH, no retry, no secret body), distinct from `invalid_input`; all
+  other failure outcomes unchanged.
+- Scope note (discussion 4282819721): the DEFAULT entrypoint
+  (`google-calendar` / `build/index.js`) still exposes EXACTLY the three
+  readonly tools — pinned by
+  `src/tests/unit/reschedule/defaultReadonlyEntry.test.ts` (no reschedule
+  imports in default sources, bin mapping unchanged). The separate opt-in
+  entrypoint above exists under explicit user authorization and is NOT a
+  widening of the default surface.

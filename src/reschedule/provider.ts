@@ -53,6 +53,9 @@ export const DEFINITE_FAILURE_CODES = [
   // Read-transport loss BEFORE any dispatch: definite (no patch was sent,
   // so the no-commit proof is intact — never `unknown`-as-commit).
   "read_transport_lost",
+  // Transient preflight read failure (HTTP 429/5xx) BEFORE any dispatch:
+  // definite redacted upstream code (never `invalid_input`, no retry).
+  "read_upstream_error",
 ] as const;
 
 export interface RescheduleProvider {
@@ -129,21 +132,52 @@ export const WRITE_SCOPES = [
 ] as const;
 
 /**
+ * Broad write scopes that are NEVER accepted, even when the exact
+ * least-privilege token is also present. The full `.../auth/calendar`
+ * token implies full calendar access and must never ride the dedicated
+ * write namespace.
+ */
+export const REFUSED_BROAD_WRITE_SCOPES = [
+  "https://www.googleapis.com/auth/calendar",
+] as const;
+
+/**
  * Validate that a granted-scope string carries the exact least-privilege
  * write scope (`.../calendar.events` ONLY). The granted value is split on
  * EXACT ASCII whitespace runs; one token must equal the exact write scope.
  * Substring matching is NEVER used, so `.../calendar.events.foo`,
  * `.../calendar.readonly-plus`, or the broad `.../calendar` scope cannot
- * pass. Readonly tokens (`calendar.readonly`, `calendar.events.readonly`,
- * `calendar.settings.readonly`, ...) are refused: they never contain the
- * exact write token. Empty/missing scope is refused. Config alone is not a
+ * pass. Any broad write scope (`.../auth/calendar`) present ANYWHERE in the
+ * string refuses the WHOLE credential — even when the exact write token is
+ * also present (least privilege: overprivileged credentials never enter the
+ * dedicated namespace). Readonly tokens (`calendar.readonly`,
+ * `calendar.events.readonly`, `calendar.settings.readonly`, ...) alongside
+ * the exact write token remain accepted: they grant nothing beyond reads.
+ * Empty/missing scope is refused. Config alone is not a
  * grant: the live OAuth refresh response `scope` (when present) is verified
- * separately in `./auth.js`. No OAuth flow is started here and no scope is
- * broadened.
+ * separately in `./auth.js` with this SAME function, and a refused refresh
+ * persists nothing (no token file write on refusal). No OAuth flow is
+ * started here and no scope is broadened.
  */
 export function validateWriteCredential(scope: string | undefined): boolean {
   if (typeof scope !== "string" || scope.length === 0) return false;
   const tokens = scope.split(/[\t\n\f\r ]+/).filter((t) => t.length > 0);
   if (tokens.length === 0) return false;
+  for (const broad of REFUSED_BROAD_WRITE_SCOPES) {
+    if (tokens.some((t) => t === broad)) return false;
+  }
   return tokens.some((t) => t === WRITE_SCOPES[0]);
+}
+
+/**
+ * True when a caller-supplied etag is a usable exact conditional value:
+ * non-empty, not the `*` wildcard, and not an If-Match list (`,`).
+ * Wildcards/lists never satisfy the committed-grant equality contract, even
+ * when the live etag happens to contain the same bytes (it never does — a
+ * live wildcard etag is itself refused as unauthenticated).
+ */
+export function isExactEtagCandidate(value: string): boolean {
+  if (value.length === 0 || value.length > 256) return false;
+  if (value.includes("*") || value.includes(",")) return false;
+  return true;
 }

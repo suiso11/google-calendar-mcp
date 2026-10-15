@@ -66,6 +66,18 @@ describe("production boundary (shipped CLI immutable, exact scope)", () => {
     expect(
       validateWriteCredential("https://www.googleapis.com/auth/calendar"),
     ).toBe(false);
+    // Broad scope mixed WITH the exact token is still refused (least
+    // privilege: overprivileged credentials never enter the namespace).
+    expect(
+      validateWriteCredential(
+        "https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar",
+      ),
+    ).toBe(false);
+    expect(
+      validateWriteCredential(
+        "https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/calendar.events",
+      ),
+    ).toBe(false);
     for (const readonlyScope of [
       "https://www.googleapis.com/auth/calendar.readonly",
       "https://www.googleapis.com/auth/calendar.events.readonly",

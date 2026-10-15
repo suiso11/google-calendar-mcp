@@ -14,6 +14,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
   beforeWriteGuard,
+  isExactEtagCandidate,
   type RescheduleObservation,
   type RescheduleProvider,
   validateWriteCredential,
@@ -107,6 +108,11 @@ export function createRescheduleServer(options: RescheduleServerOptions) {
         current = await options.provider.read(target, signal);
       } catch (error) {
         const message = error instanceof Error ? error.message : "";
+        // Transient preflight read failures (HTTP 429/5xx surfaced as
+        // `read_failed:http_*`) keep a DEDICATED redacted code — never
+        // `invalid_input` (the request was well-formed), never a retry, no
+        // secret body. NO patch was (or will be) dispatched on this path, so
+        // the outcome stays definite_failure.
         const code =
           message === "auth_refused"
             ? "auth_refused"
@@ -114,7 +120,9 @@ export function createRescheduleServer(options: RescheduleServerOptions) {
               ? "not_found"
               : message === "read_transport_lost"
                 ? "read_transport_lost"
-                : "invalid_input";
+                : message.startsWith("read_failed:")
+                  ? "read_upstream_error"
+                  : "invalid_input";
         return {
           content: [
             {
@@ -141,9 +149,30 @@ export function createRescheduleServer(options: RescheduleServerOptions) {
           ],
         };
       }
-      // Exact opaque etag tied to the committed grant: the provider performs
-      // exactly ONE conditional patch (If-Match) reusing this observation —
-      // no second GET. 412 is definite failure.
+      // Exact opaque etag tied to the committed grant: the conditional MUST
+      // equal the JUST-READ current etag exactly, or no PATCH is dispatched
+      // (definite `etag_mismatch`). Wildcards (`*`) and If-Match lists (`,`)
+      // never dispatch: `If-Match: *` would succeed whenever the resource
+      // merely exists, bypassing the concurrency guard and risking a lost
+      // update on a concurrently changed event. The approved etag still
+      // rides `If-Match` verbatim on the live attempt, so a race BETWEEN
+      // the GET and the PATCH is proven by HTTP 412 below (definite
+      // `etag_mismatch`, no apply, no resend) — the provider performs
+      // exactly ONE conditional patch reusing this observation, no second
+      // GET. 412 is definite failure.
+      if (!isExactEtagCandidate(input.expectedEtag) || input.expectedEtag !== current.etag) {
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: JSON.stringify({
+                status: "definite_failure",
+                code: "etag_mismatch",
+              }),
+            },
+          ],
+        };
+      }
       let outcome: Awaited<ReturnType<RescheduleProvider["patch"]>>;
       try {
         outcome = await options.provider.patch(

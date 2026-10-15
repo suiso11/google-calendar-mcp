@@ -35,6 +35,7 @@
 
 import {
   googleEventUrl,
+  isExactEtagCandidate,
   type RescheduleObservation,
   type ReschedulePatch,
   type RescheduleProvider,
@@ -420,8 +421,12 @@ export function createGoogleRescheduleProvider(
     | { readonly status: "definite_failure"; readonly code: string }
     | { readonly status: "unknown"; readonly code: string }
   > {
-    if (opts.ifMatch.length === 0) {
-      return { status: "definite_failure", code: "auth_refused" };
+    // Committed-grant equality contract (safe for DIRECT provider calls too):
+    // wildcards / If-Match lists never dispatch. A supplied observation must
+    // equal the conditional etag exactly or the patch is refused with NO
+    // dispatch; a live wildcard etag is itself unauthenticated.
+    if (!isExactEtagCandidate(opts.ifMatch)) {
+      return { status: "definite_failure", code: "etag_mismatch" };
     }
     // Account gate FIRST: no token I/O, no provider I/O on mismatch.
     try {
@@ -446,11 +451,31 @@ export function createGoogleRescheduleProvider(
         if (message === "not_found") {
           return { status: "definite_failure", code: "not_found" };
         }
+        // Transient preflight failures (HTTP 429/5xx surfaced as
+        // `read_failed:http_*`) BEFORE any dispatch: definite with a
+        // redacted upstream code — never `invalid_input` (the request was
+        // well-formed; the upstream was not), never not_found/auth, never
+        // unknown-commit — and NO patch dispatched. All other pre-dispatch
+        // read failures keep their existing definite codes below.
+        if (message.startsWith("read_failed:")) {
+          return { status: "definite_failure", code: "read_upstream_error" };
+        }
         // redirect / malformed / oversize / read-transport / other 4xx BEFORE
         // any dispatch: definite (no patch dispatched), never unknown-commit
         // and never not_found/auth.
         return { status: "definite_failure", code: "invalid_input" };
       }
+    }
+    // Exact equality with the just-read etag BEFORE dispatch: a stale or
+    // wildcard/list conditional never reaches the wire (the server's own
+    // guard does the same; this keeps direct provider calls safe too). The
+    // approved etag still rides `If-Match` verbatim on the live attempt, so
+    // a race between GET and PATCH is proven by HTTP 412 below.
+    if (!isExactEtagCandidate(current.etag)) {
+      return { status: "definite_failure", code: "auth_refused" };
+    }
+    if (opts.ifMatch !== current.etag) {
+      return { status: "definite_failure", code: "etag_mismatch" };
     }
     if (current.status === "deleted" && current.etag === "") {
       return { status: "definite_failure", code: "not_found" };

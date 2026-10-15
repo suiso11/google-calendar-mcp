@@ -22,17 +22,53 @@ export const RESCHEDULE_TOOL_NAME = "reschedule-event" as const;
 const OpaqueIdSchema = z.string().min(1).max(512);
 const AccountSchema = z.string().min(1).max(512);
 
+/**
+ * Strict RFC3339 instant grammar with real calendar validation (no
+ * `Date.parse` rollover): `2023-02-30` is rejected instead of normalized to
+ * March 2. Month lengths, leap years, time ranges, and numeric offsets are
+ * enforced; `start < end` is still checked on the parsed instants.
+ */
+const ISO_INSTANT_PATTERN =
+  /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d+))?)?(Z|[+-](\d{2}):(\d{2}))$/;
+
+export function isStrictCalendarInstant(value: string): boolean {
+  if (value.length === 0 || value.length > 128) return false;
+  const m = ISO_INSTANT_PATTERN.exec(value);
+  if (m === null) return false;
+  const year = Number(m[1]);
+  const month = Number(m[2]);
+  const day = Number(m[3]);
+  const hour = Number(m[4]);
+  const minute = Number(m[5]);
+  const second = m[6] === undefined ? 0 : Number(m[6]);
+  const zone = m[8] ?? "";
+  if (month < 1 || month > 12) return false;
+  const leap =
+    year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const daysInMonth = [
+    31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31,
+  ][month - 1] ?? 0;
+  if (day < 1 || day > daysInMonth) return false;
+  if (hour > 23 || minute > 59 || second > 59) return false;
+  if (zone !== "Z") {
+    const offHour = Number(m[9]);
+    const offMinute = Number(m[10]);
+    if (offHour > 23 || offMinute > 59) return false;
+  }
+  // Grammar + calendar are valid; the instant must also parse (fraction /
+  // offset arithmetic) and preserve ordering at the call site.
+  return !Number.isNaN(Date.parse(value));
+}
+
 /** Strict RFC3339-with-offset instant (explicit offset, no bare dates). */
 const IsoInstantSchema = z
   .string()
   .min(1)
   .max(128)
-  .refine((value) => {
-    const ms = Date.parse(value);
-    if (Number.isNaN(ms)) return false;
-    // Require an explicit zone designator (Z or ±HH:MM) and a time part.
-    return /T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})$/.test(value);
-  }, "start/end must be RFC3339 instants with an explicit offset");
+  .refine(
+    (value) => isStrictCalendarInstant(value),
+    "start/end must be RFC3339 instants with an explicit offset",
+  );
 
 /**
  * Exact `reschedule-event` input: start/end fields ONLY plus the exact
