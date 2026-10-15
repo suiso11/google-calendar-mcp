@@ -1,0 +1,27 @@
+{
+  "name": "@m5-fork/calendar-reschedule-mcp",
+  "version": "1.0.0-reschedule.1",
+  "private": true,
+  "type": "module",
+  "description": "M5 dedicated start/end-only reschedule MCP (separate stdio entrypoint; never the readonly surface)",
+  "bin": {
+    "calendar-reschedule-mcp": "./dist/server.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/server.js",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.30.0",
+    "zod": "4.5.4"
+  },
+  "devDependencies": {
+    "@types/node": "24.12.4",
+    "typescript": "5.9.3",
+    "vitest": "3.2.4"
+  },
+  "engines": {
+    "node": "24.12.0"
+  }
+}
