@@ -5,7 +5,8 @@
   "type": "module",
   "main": "build/index.js",
   "bin": {
-    "google-calendar-mcp": "build/index.js"
+    "google-calendar-mcp": "build/index.js",
+    "calendar-reschedule-mcp": "build/reschedule-cli.js"
   },
   "files": [
     "build/",
@@ -35,6 +36,8 @@
   "scripts": {
     "start": "node build/index.js",
     "build": "node scripts/build.js",
+    "build:reschedule": "node scripts/build.js --reschedule-only",
+    "start:reschedule": "node build/reschedule-cli.js",
     "auth": "node build/auth-server.js",
     "account": "node scripts/account-manager.js",
     "dev": "node scripts/dev.js",
