@@ -6,7 +6,6 @@ import { ALLOWED_EVENT_FIELDS } from "../utils/field-mask-builder.js";
 import { ServerConfig } from "../config/TransportConfig.js";
 
 // Import readonly handlers only (readonly-mode: write/list-colors/freebusy/current-time/respond handlers are unreachable)
-import { ListCalendarsHandler } from "../handlers/core/ListCalendarsHandler.js";
 import { ListEventsHandler } from "../handlers/core/ListEventsHandler.js";
 import { SearchEventsHandler } from "../handlers/core/SearchEventsHandler.js";
 import { GetEventHandler } from "../handlers/core/GetEventHandler.js";
@@ -17,9 +16,9 @@ import { GetEventHandler } from "../handlers/core/GetEventHandler.js";
 // Note: We use validation functions instead of shared schemas to avoid $ref
 // generation in JSON schema output, which can cause issues with some MCP clients.
 
-// ISO 8601 datetime regex patterns
-const ISO_DATETIME_WITH_TZ = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(Z|[+-]\d{2}:\d{2})$/;
-const ISO_DATETIME_WITHOUT_TZ = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/;
+// ISO 8601 datetime regex patterns (optional decimal fraction preserves Companion byte-for-byte bounds)
+const ISO_DATETIME_WITH_TZ = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$/;
+const ISO_DATETIME_WITHOUT_TZ = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?$/;
 const ISO_DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
 
 // Validation functions
@@ -138,7 +137,7 @@ const timeMaxSchema = z.string()
   .optional();
 
 const timeZoneSchema = z.string().optional().describe(
-  "IANA timezone (e.g., 'America/Los_Angeles'). Defaults to calendar's timezone."
+  "IANA timezone (e.g., 'America/Los_Angeles') for interpreting timezone-naive bounds. Defaults to UTC; no calendar metadata lookup."
 );
 
 /**
@@ -239,14 +238,10 @@ const multiAccountSchema = z.preprocess(
 
 // Define all tool schemas with TypeScript inference
 export const ToolSchemas = {
-  'list-calendars': z.object({
-    account: multiAccountSchema
-  }),
-
   'list-events': z.object({
     account: multiAccountSchema,
     calendarId: z.string().min(1, "Calendar ID must be a non-empty string").describe(
-      "Calendar identifier to query. Accepts a calendar ID (e.g., 'primary', 'user@gmail.com') OR a calendar name (e.g., 'Work'). Single calendar only."
+      "Exact calendar ID to query (e.g., 'primary', 'user@gmail.com', or an opaque calendar ID). Forwarded verbatim; calendar names are not resolved."
     ),
     timeMin: timeMinSchema,
     timeMax: timeMaxSchema,
@@ -265,7 +260,7 @@ export const ToolSchemas = {
   'search-events': z.object({
     account: multiAccountSchema,
     calendarId: z.string().min(1, "Calendar ID must be a non-empty string").describe(
-      "Calendar identifier to search. Accepts a calendar ID (e.g., 'primary', 'user@gmail.com') OR a calendar name (e.g., 'Work'). Single calendar only."
+      "Exact calendar ID to search (e.g., 'primary', 'user@gmail.com', or an opaque calendar ID). Forwarded verbatim; calendar names are not resolved."
     ),
     query: z.string().min(1, "Query must be a non-empty string").optional().describe(
       "Free text search query (searches summary, description, location, attendees, etc.). Omit to list events in the time range."
@@ -302,7 +297,7 @@ export const ToolSchemas = {
   
   'get-event': z.object({
     account: singleAccountSchema,
-    calendarId: z.string().describe("ID of the calendar (use 'primary' for the main calendar)"),
+    calendarId: z.string().describe("Exact calendar ID holding the event (e.g., 'primary', an email, or an opaque calendar ID). Forwarded verbatim; calendar names are not resolved."),
     eventId: z.string().describe("ID of the event to retrieve"),
     fields: z.array(z.enum(ALLOWED_EVENT_FIELDS)).optional().describe(
       "Optional array of additional event fields to retrieve. Available fields are strictly validated. Default fields (id, summary, start, end, status, htmlLink, location, attendees) are always included."
@@ -698,7 +693,7 @@ export const ToolSchemas = {
     calendarId: z.string().describe("ID of the calendar (use 'primary' for the main calendar)"),
     eventId: z.string().describe("ID of the event to respond to"),
     account: z.string().optional().describe(
-      "Account nickname to use for this operation (e.g., 'work', 'personal'). Optional when only one account is connected - will auto-select the account with appropriate permissions. Use 'list-calendars' to see available accounts."
+      "Account nickname to use for this operation (e.g., 'work', 'personal'). Optional when only one account is connected - will auto-select the account with appropriate permissions."
     ),
     response: z.enum(RESPONSE_STATUS_VALUES).describe(
       "Your response to the event invitation: 'accepted' (accept), 'declined' (decline), 'tentative' (maybe), 'needsAction' (no response)"
@@ -737,7 +732,6 @@ export type ToolInputs = {
 };
 
 // Export individual types for convenience
-export type ListCalendarsInput = ToolInputs['list-calendars'];
 export type ListEventsInput = ToolInputs['list-events'];
 export type SearchEventsInput = ToolInputs['search-events'];
 export type GetEventInput = ToolInputs['get-event'];
@@ -780,17 +774,9 @@ export class ToolRegistry {
 
   private static tools: ToolDefinition[] = [
     {
-      name: "list-calendars",
-      title: "List Calendars",
-      description: "List all available calendars",
-      annotations: READ_ONLY_ANNOTATIONS,
-      schema: ToolSchemas['list-calendars'],
-      handler: ListCalendarsHandler
-    },
-    {
       name: "list-events",
       title: "List Calendar Events",
-      description: "List events from a single calendar. Supports calendar IDs and calendar names. Paginated via pageSize/pageToken.",
+      description: "List events from a single calendar by exact calendar ID. Paginated via pageSize/pageToken.",
       annotations: READ_ONLY_ANNOTATIONS,
       schema: ToolSchemas['list-events'],
       handler: ListEventsHandler,
@@ -812,7 +798,7 @@ export class ToolRegistry {
     {
       name: "search-events",
       title: "Search Calendar Events",
-      description: "Search for events in a single calendar by text query. Paginated via pageSize/pageToken.",
+      description: "Search for events in a single calendar by exact calendar ID and text query. Paginated via pageSize/pageToken.",
       annotations: READ_ONLY_ANNOTATIONS,
       schema: ToolSchemas['search-events'],
       handler: SearchEventsHandler
@@ -820,7 +806,7 @@ export class ToolRegistry {
     {
       name: "get-event",
       title: "Get Event Details",
-      description: "Get details of a specific event by ID.",
+      description: "Get details of a specific event by exact calendar ID and event ID.",
       annotations: READ_ONLY_ANNOTATIONS,
       schema: ToolSchemas['get-event'],
       handler: GetEventHandler

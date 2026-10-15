@@ -87,7 +87,7 @@ Environment Variables:
 Examples:
   node build/index.js                              # stdio (local use)
   node build/index.js --transport http --port 3000 # HTTP server
-  node build/index.js --enable-tools list-calendars,list-events
+  node build/index.js --enable-tools list-events,search-events,get-event
   PORT=3000 TRANSPORT=http node build/index.js     # Using env vars
         `);
         process.exit(0);

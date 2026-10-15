@@ -9,7 +9,7 @@
  * @returns True if timezone is included, false if timezone-naive
  */
 export function hasTimezoneInDatetime(datetime: string): boolean {
-    return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(Z|[+-]\d{2}:\d{2})$/.test(datetime);
+    return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$/.test(datetime);
 }
 
 /**
@@ -28,15 +28,20 @@ export function convertToRFC3339(datetime: string, fallbackTimezone: string): st
         // Already has timezone, use as-is
         return datetime;
     } else {
-        // Timezone-naive, interpret as local time in fallbackTimezone and convert to UTC
+        // Timezone-naive, interpret as local time in fallbackTimezone and convert to UTC.
+        // A decimal fraction (if present) is preserved verbatim: conversion reuses the
+        // existing whole-second timezone logic (DST-safe), then reattaches the exact
+        // input fraction digits before the offset. No truncation, rounding, or
+        // Date.toISOString() reconstruction of explicit-offset inputs.
         try {
-            // Parse the datetime components
-            const match = datetime.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})$/);
+            // Parse the datetime components (optional decimal fraction preserved separately)
+            const match = datetime.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(\.\d+)?$/);
             if (!match) {
                 throw new Error('Invalid datetime format');
             }
             
-            const [, year, month, day, hour, minute, second] = match.map(Number);
+            const [, yearStr, monthStr, dayStr, hourStr, minuteStr, secondStr, fraction] = match;
+            const [year, month, day, hour, minute, second] = [yearStr, monthStr, dayStr, hourStr, minuteStr, secondStr].map(Number);
             
             // Create a temporary date in UTC to get the baseline
             const utcDate = new Date(Date.UTC(year, month - 1, day, hour, minute, second));
@@ -45,7 +50,8 @@ export function convertToRFC3339(datetime: string, fallbackTimezone: string): st
             // We do this by binary search approach or by using the timezone offset
             const targetDate = convertLocalTimeToUTC(year, month - 1, day, hour, minute, second, fallbackTimezone);
             
-            return targetDate.toISOString().replace(/\.000Z$/, 'Z');
+            const base = targetDate.toISOString().replace(/\.000Z$/, 'Z');
+            return fraction ? base.replace(/Z$/, `${fraction}Z`) : base;
         } catch (error) {
             // Fallback: if timezone conversion fails, append Z for UTC
             return datetime + 'Z';

@@ -1,5 +1,9 @@
 # Changelog
 
+## 3.0.0-readonly.2
+
+Intentional breaking narrow cutover: MCP surface is exactly three event tools (`list-events`, `search-events`, `get-event`); `list-calendars` is removed with no alias or shim. Exact configured `calendarId` values are opaque and forwarded byte-for-byte (no name resolution); the MCP path performs no `calendarList`/`calendars` metadata I/O. Timezone-naive bounds use the explicit `timeZone` when given, else deterministic UTC (no calendar-timezone lookup). Account selection is exactly one account per request (explicit normalized ID, or the sole configured key); multi-account ambiguity and invalid accounts reject before any provider I/O. Fractional explicit-offset bounds keep byte-for-byte preservation. Out-of-band account provisioning remains consent plumbing only, not an MCP read capability. Release identity stays private (`private: true`, version `3.0.0-readonly.2`) and never published to npm.
+
 ## 3.0.0-readonly.1
 
 Readonly Companion Calendar MCP fork prerelease. Breaking change: MCP surface is read-only (`list-calendars`, `list-events`, `search-events`, `get-event`); no write operations. Release identity is private (`private: true`, version `3.0.0-readonly.1`) and never published to npm; upstream `publish.yml` release workflow removed.

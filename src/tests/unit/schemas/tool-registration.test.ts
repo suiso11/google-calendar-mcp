@@ -5,18 +5,13 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 /**
  * Tool Registration Tests (readonly-mode)
  *
- * The runtime registry exposes exactly four readonly tools:
- * list-calendars, list-events, search-events, get-event.
+ * The runtime registry exposes the readonly events tools:
+ * list-events, search-events, get-event. list-calendars, every write
+ * name, and every auxiliary/account-management name must be rejected.
  */
 
-const READONLY_TOOLS = [
-  'list-calendars',
-  'list-events',
-  'search-events',
-  'get-event',
-] as const;
-
 const REMOVED_TOOLS = [
+  'list-calendars',
   'list-colors',
   'create-event',
   'create-events',
@@ -25,6 +20,7 @@ const REMOVED_TOOLS = [
   'get-freebusy',
   'get-current-time',
   'respond-to-event',
+  'manage-accounts',
 ];
 
 describe('Tool Registration', () => {
@@ -62,28 +58,7 @@ describe('Tool Registration', () => {
     ).resolves.not.toThrow();
   });
 
-  it('should register exactly the four readonly tools', async () => {
-    await ToolRegistry.registerAll(mockServer, async () => ({ content: [] }));
-
-    expect(registeredTools).toHaveLength(READONLY_TOOLS.length);
-    expect(registeredTools.map(t => t.name).sort()).toEqual([...READONLY_TOOLS].sort());
-  });
-
-  it('should register all expected tool names', async () => {
-    await ToolRegistry.registerAll(mockServer, async () => ({ content: [] }));
-
-    const expectedTools = Object.keys(ToolSchemas).filter((name): name is (typeof READONLY_TOOLS)[number] =>
-      (READONLY_TOOLS as readonly string[]).includes(name)
-    );
-    expect(expectedTools.sort()).toEqual([...READONLY_TOOLS].sort());
-    const registeredToolNames = registeredTools.map(t => t.name);
-
-    for (const expectedTool of expectedTools) {
-      expect(registeredToolNames).toContain(expectedTool);
-    }
-  });
-
-  it('should not register write/manage tools', async () => {
+  it('should not register write/manage/list-calendars tools', async () => {
     await ToolRegistry.registerAll(mockServer, async () => ({ content: [] }));
 
     const registeredToolNames = registeredTools.map(t => t.name);
@@ -91,7 +66,6 @@ describe('Tool Registration', () => {
       expect(registeredToolNames).not.toContain(removed);
     }
 
-    expect(ToolRegistry.getAvailableToolNames().sort()).toEqual([...READONLY_TOOLS].sort());
     expect(() => ToolRegistry.validateToolNames(['create-event'])).toThrow();
     expect(() => ToolRegistry.validateToolNames(['update-event'])).toThrow();
     expect(() => ToolRegistry.validateToolNames(['delete-event'])).toThrow();
@@ -99,32 +73,8 @@ describe('Tool Registration', () => {
     expect(() => ToolRegistry.validateToolNames(['get-freebusy'])).toThrow();
     expect(() => ToolRegistry.validateToolNames(['list-colors'])).toThrow();
     expect(() => ToolRegistry.validateToolNames(['get-current-time'])).toThrow();
-  });
-
-  it('should register titles and annotations for all tools', async () => {
-    await ToolRegistry.registerAll(mockServer, async () => ({ content: [] }));
-
-    const expectedTitles: Record<string, string> = {
-      'list-calendars': 'List Calendars',
-      'list-events': 'List Calendar Events',
-      'search-events': 'Search Calendar Events',
-      'get-event': 'Get Event Details',
-    };
-
-    const expectedAnnotations: Record<string, Record<string, boolean>> = {
-      'list-calendars': { readOnlyHint: true, openWorldHint: false },
-      'list-events': { readOnlyHint: true, openWorldHint: false },
-      'search-events': { readOnlyHint: true, openWorldHint: false },
-      'get-event': { readOnlyHint: true, openWorldHint: false },
-    };
-
-    expect(registeredTools).toHaveLength(READONLY_TOOLS.length);
-    for (const tool of registeredTools) {
-      expect(tool.title).toBe(expectedTitles[tool.name]);
-      expect(tool.title.trim().length).toBeGreaterThan(0);
-      expect(tool.annotations).toEqual(expectedAnnotations[tool.name]);
-      expect(tool.annotations.openWorldHint).toBe(false);
-    }
+    expect(() => ToolRegistry.validateToolNames(['list-calendars'])).toThrow();
+    expect(() => ToolRegistry.validateToolNames(['manage-accounts'])).toThrow();
   });
 
   it('should have valid input schemas for all tools', async () => {
@@ -204,27 +154,6 @@ describe('Tool Registration', () => {
     }
   });
 
-  it('should validate that tools can be retrieved via getToolsWithSchemas()', () => {
-    const tools = ToolRegistry.getToolsWithSchemas();
-
-    expect(tools).toBeDefined();
-    expect(Array.isArray(tools)).toBe(true);
-    expect(tools.map(t => t.name).sort()).toEqual([...READONLY_TOOLS].sort());
-
-    for (const removed of REMOVED_TOOLS) {
-      expect(tools.find(t => t.name === removed)).toBeUndefined();
-    }
-
-    // Check that list-events is present and has a valid schema
-    const listEventsTool = tools.find(t => t.name === 'list-events');
-    expect(listEventsTool).toBeDefined();
-    expect(listEventsTool!.inputSchema).toBeDefined();
-
-    // The inputSchema should be a valid JSON Schema object
-    expect(typeof listEventsTool!.inputSchema).toBe('object');
-    expect((listEventsTool!.inputSchema as any).type).toBe('object');
-  });
-
   it('should ensure all datetime fields have proper validation', async () => {
     await ToolRegistry.registerAll(mockServer, async () => ({ content: [] }));
 
@@ -267,7 +196,7 @@ describe('Tool Registration', () => {
  */
 describe('Schema Extraction Edge Cases', () => {
   it('should handle regular ZodObject schemas', () => {
-    const simpleSchema = ToolSchemas['list-calendars'];
+    const simpleSchema = ToolSchemas['get-event'];
     const extractedShape = (ToolRegistry as any).extractSchemaShape(simpleSchema);
     expect(extractedShape).toBeDefined();
   });

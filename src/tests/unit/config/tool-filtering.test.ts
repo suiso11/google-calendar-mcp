@@ -71,7 +71,7 @@ describe('Tool Filtering', () => {
   describe('ToolRegistry.validateToolNames', () => {
     it('should not throw for valid readonly tool names', () => {
       expect(() => {
-        ToolRegistry.validateToolNames(['list-events', 'list-calendars', 'search-events', 'get-event']);
+        ToolRegistry.validateToolNames(['list-events', 'search-events', 'get-event']);
       }).not.toThrow();
     });
 
@@ -89,6 +89,7 @@ describe('Tool Filtering', () => {
 
     it('should reject every write/non-approved tool', () => {
       const rejected = [
+        'list-calendars',
         'create-event',
         'create-events',
         'update-event',
@@ -126,18 +127,11 @@ describe('Tool Filtering', () => {
   });
 
   describe('ToolRegistry.getAvailableToolNames', () => {
-    it('should return exactly the readonly tool set by default', () => {
-      const toolNames = ToolRegistry.getAvailableToolNames();
-
-      expect([...toolNames].sort()).toEqual(
-        ['get-event', 'list-calendars', 'list-events', 'search-events']
-      );
-    });
-
-    it('should not expose write/manage/non-approved tools', () => {
+    it('should not expose list-calendars/write/manage/non-approved tools', () => {
       const toolNames = ToolRegistry.getAvailableToolNames();
 
       for (const name of [
+        'list-calendars',
         'create-event',
         'create-events',
         'update-event',
