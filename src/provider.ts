@@ -1,24 +1,14 @@
-// M5 dedicated reschedule provider boundary.
+// M5 dedicated reschedule provider boundary (production types + guards).
 //
 // Injectable provider seam: the MCP server owns tool parsing + the exact
 // If-Match wire contract; the host injects the HTTP/Google implementation.
-// Reuses the existing Google client shape where safe (events.patch with
-// If-Match), but NEVER shares the readonly credential namespace and NEVER
-// invokes an OAuth flow at runtime.
-//
-// Closed three-outcome contract per dispatch:
-//   - `succeeded` — provider confirmed the patch.
-//   - `definite_failure` — provider proved the write did NOT happen (HTTP
-//     412 precondition failed on the exact etag, or a known before-write
-//     rejection: invalid input, recurring/instance, cancelled/deleted,
-//     all-day, not-found, scope/auth refusal). No patch was applied.
-//   - `unknown` — the write may or may not have happened (timeout, abort,
-//     disconnect after possible dispatch). NEVER auto-resend, NEVER cancel.
-//
-// Transport: retry:false — exactly ONE HTTP attempt per logical update
-// (including auth/refresh layers: no hidden resend). Repeated logical
-// updates must not auto resend; external idempotency is at-most-once via
-// grant + conditional etag, not exactly-once provider magic.
+// The production implementation is `createGoogleRescheduleProvider` in
+// `./google.js` (real GET + PATCH against the fixed Google endpoint, real
+// bearer auth from the SEPARATE `M5_RESCHEDULE_*` namespace, no OAuth flow
+// at runtime). This module keeps ONLY the shared boundary types, the
+// before-write guard, the fixed Google URL builder, and exact-whitespace
+// write-scope validation. Fixture/test providers live in TESTS ONLY and
+// must never be imported from this production module.
 
 export type RescheduleTarget = {
   readonly calendarId: string;
@@ -82,7 +72,7 @@ export interface RescheduleProvider {
 }
 
 /* ------------------------------------------------------------------ */
-/* Shared guards (both fixture + Google providers use these)           */
+/* Shared guards (production Google provider + server use these)       */
 /* ------------------------------------------------------------------ */
 
 /**
@@ -90,7 +80,9 @@ export interface RescheduleProvider {
  * missing etag, recurring, cancelled/deleted, all-day. Returns the fixed
  * definite code or null when the shape is patchable.
  */
-export function beforeWriteGuard(observation: RescheduleObservation): string | null {
+export function beforeWriteGuard(
+  observation: RescheduleObservation,
+): string | null {
   if (observation.etag.length === 0) return "auth_refused";
   if (observation.recurring) return "recurring_unsupported";
   if (observation.status === "cancelled") return "cancelled_unsupported";
@@ -100,155 +92,53 @@ export function beforeWriteGuard(observation: RescheduleObservation): string | n
 }
 
 /* ------------------------------------------------------------------ */
-/* Local real-HTTP fixture provider (tests + smoke; never production)  */
+/* Production Google endpoint (FIXED) + explicit test seam             */
 /* ------------------------------------------------------------------ */
 
-export type FixtureEventRecord = {
-  etag: string;
-  status: "confirmed" | "tentative" | "cancelled" | "deleted";
-  start: string;
-  end: string;
-  recurring: boolean;
-  allDay: boolean;
-};
+/** Fixed production Google Calendar API base (never overridden in prod). */
+export const GOOGLE_API_BASE = "https://www.googleapis.com" as const;
 
 /**
- * HTTP fixture provider: exercises the REAL wire adapter (single fetch,
- * If-Match header, 412 mapping, no retry) against a local loopback fixture
- * server. The fixture server stores events keyed by calendarId/eventId and
- * implements exact-etag If-Match semantics.
+ * Production events.get/patch URL (FIXED Google endpoint). `baseOverride`
+ * exists ONLY as an explicit test seam: the production CLI never sets it.
+ * Tests inject a loopback fixture base through provider options instead.
  */
-export function createFixtureHttpProvider(options: {
-  readonly baseUrl: string;
-  readonly fetchImpl?: typeof fetch;
-}): RescheduleProvider {
-  const fetchImpl = options.fetchImpl ?? fetch;
-  const base = options.baseUrl.replace(/\/$/, "");
-  const keyOf = (t: RescheduleTarget) =>
-    `${encodeURIComponent(t.calendarId)}/${encodeURIComponent(t.eventId)}`;
-
-  async function read(
-    target: RescheduleTarget,
-    signal?: AbortSignal,
-  ): Promise<RescheduleObservation> {
-    const res = await fetchImpl(`${base}/events/${keyOf(target)}`, {
-      method: "GET",
-      signal,
-      redirect: "manual",
-    });
-    if (res.status === 404) {
-      return {
-        etag: "",
-        status: "deleted",
-        start: "",
-        end: "",
-        recurring: false,
-        allDay: false,
-      };
-    }
-    if (!res.ok) throw new Error(`fixture read failed: HTTP ${res.status}`);
-    const body = (await res.json()) as FixtureEventRecord;
-    return {
-      etag: body.etag,
-      status: body.status,
-      start: body.start,
-      end: body.end,
-      recurring: body.recurring,
-      allDay: body.allDay,
-    };
-  }
-
-  async function patch(
-    target: RescheduleTarget,
-    patchBody: ReschedulePatch,
-    opts: { readonly ifMatch: string },
-    signal?: AbortSignal,
-  ): Promise<ProviderOutcome> {
-    // Guard: read-before-patch rejects unsupported shapes with NO patch.
-    let current: RescheduleObservation;
-    try {
-      current = await read(target, signal);
-    } catch {
-      return { status: "unknown", code: "read_transport_lost" };
-    }
-    if (current.status === "deleted" && current.etag === "") {
-      return { status: "definite_failure", code: "not_found" };
-    }
-    const guard = beforeWriteGuard(current);
-    if (guard !== null) {
-      return { status: "definite_failure", code: guard };
-    }
-    // EXACTLY ONE conditional PATCH, retry:false, no redirect follow.
-    let res: Response;
-    try {
-      res = await fetchImpl(`${base}/events/${keyOf(target)}`, {
-        method: "PATCH",
-        headers: {
-          "content-type": "application/json",
-          "If-Match": opts.ifMatch,
-        },
-        body: JSON.stringify({ start: patchBody.start, end: patchBody.end }),
-        signal,
-        redirect: "manual",
-      });
-    } catch {
-      // Transport lost around a possibly-dispatched write: unknown, no resend.
-      return { status: "unknown", code: "transport_lost" };
-    }
-    if (res.status === 412) {
-      // Exact etag did not match: provider proves NO patch was applied.
-      return { status: "definite_failure", code: "etag_mismatch" };
-    }
-    if (res.status === 404) {
-      return { status: "definite_failure", code: "not_found" };
-    }
-    if (res.status === 400 || res.status === 422) {
-      return { status: "definite_failure", code: "invalid_input" };
-    }
-    if (res.status >= 300 && res.status < 400) {
-      return { status: "definite_failure", code: "invalid_input" };
-    }
-    if (!res.ok) {
-      return { status: "definite_failure", code: "invalid_input" };
-    }
-    return { status: "succeeded" };
-  }
-
-  return { read, patch };
-}
-
-/* ------------------------------------------------------------------ */
-/* Google wire adapter (documented mapping; NO live mutation here)     */
-/* ------------------------------------------------------------------ */
-
-/**
- * Google Calendar wire mapping for events.patch (DOCUMENTED, not executed
- * live in this task): PATCH
- * `https://www.googleapis.com/calendar/v3/calendars/{calendarId}/events/{eventId}`
- * with body `{start:{dateTime}, end:{dateTime}}` ONLY and header
- * `If-Match: "<exact etag>"`. Single attempt (retry:false, no redirect
- * follow, no batch, no recurring split). HTTP 412 → definite etag_mismatch;
- * 400/404/403/410/422 before-write failures → definite codes; network
- * timeout/abort/disconnect after dispatch → unknown (no resend, no cancel).
- *
- * Credential namespace: `M5_RESCHEDULE_*` ONLY (never the readonly
- * `GOOGLE_*` / `MCP_GOOGLE_*` namespace). Write scope validation requires a
- * write-capable scope (`.../auth/calendar.events` or `.../auth/calendar`);
- * readonly tokens (`calendar.events.readonly`) are REFUSED without any OAuth
- * flow, consent request, or scope broadening at runtime.
- */
-export const GOOGLE_PATCH_URL = (
+export function googleEventUrl(
   calendarId: string,
   eventId: string,
-): string =>
-  `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}`;
+  baseOverride?: string,
+): string {
+  const base = (baseOverride ?? GOOGLE_API_BASE).replace(/\/$/, "");
+  return `${base}/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}`;
+}
 
+/** Legacy alias (same fixed production URL, no override). */
+export const GOOGLE_PATCH_URL = (calendarId: string, eventId: string): string =>
+  googleEventUrl(calendarId, eventId);
+
+/* ------------------------------------------------------------------ */
+/* Exact-whitespace write-scope validation (production)                */
+/* ------------------------------------------------------------------ */
+
+/** Write-capable scope tokens (exact token match after whitespace split). */
+export const WRITE_SCOPES = [
+  "https://www.googleapis.com/auth/calendar",
+  "https://www.googleapis.com/auth/calendar.events",
+] as const;
+
+/**
+ * Validate that a granted-scope string carries a write-capable scope.
+ * The granted value is split on EXACT ASCII whitespace runs; each token
+ * must equal a write scope exactly. Substring matching is NEVER used, so
+ * `.../calendar.events.foo` or `.../calendar.readonly-plus` cannot pass.
+ * Readonly tokens (`calendar.readonly`, `calendar.events.readonly`,
+ * `calendar.settings.readonly`, ...) are refused: they never contain an
+ * exact write token. Empty/missing scope is refused. No OAuth flow is
+ * started here and no scope is broadened.
+ */
 export function validateWriteCredential(scope: string | undefined): boolean {
   if (typeof scope !== "string" || scope.length === 0) return false;
-  if (scope.includes("calendar.events.readonly")) return false;
-  if (scope.includes("calendar.readonly")) return false;
-  return (
-    scope.includes("https://www.googleapis.com/auth/calendar.events") ||
-    scope === "https://www.googleapis.com/auth/calendar"
-  );
+  const tokens = scope.split(/[\t\n\f\r ]+/).filter((t) => t.length > 0);
+  if (tokens.length === 0) return false;
+  return tokens.some((t) => t === WRITE_SCOPES[0] || t === WRITE_SCOPES[1]);
 }

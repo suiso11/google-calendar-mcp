@@ -5,11 +5,11 @@
   "type": "module",
   "description": "M5 dedicated start/end-only reschedule MCP (separate stdio entrypoint; never the readonly surface)",
   "bin": {
-    "calendar-reschedule-mcp": "./dist/server.js"
+    "calendar-reschedule-mcp": "./dist/cli.js"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "start": "node dist/server.js",
+    "start": "node dist/cli.js",
     "test": "vitest run"
   },
   "dependencies": {

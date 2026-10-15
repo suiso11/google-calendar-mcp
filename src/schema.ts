@@ -22,6 +22,18 @@ export const RESCHEDULE_TOOL_NAME = "reschedule-event" as const;
 const OpaqueIdSchema = z.string().min(1).max(512);
 const AccountSchema = z.string().min(1).max(512);
 
+/** Strict RFC3339-with-offset instant (explicit offset, no bare dates). */
+const IsoInstantSchema = z
+  .string()
+  .min(1)
+  .max(128)
+  .refine((value) => {
+    const ms = Date.parse(value);
+    if (Number.isNaN(ms)) return false;
+    // Require an explicit zone designator (Z or ±HH:MM) and a time part.
+    return /T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})$/.test(value);
+  }, "start/end must be RFC3339 instants with an explicit offset");
+
 /**
  * Exact `reschedule-event` input: start/end fields ONLY plus the exact
  * opaque selection and the committed-grant etag. Strict: any extra key
@@ -32,10 +44,10 @@ export const RescheduleEventInputSchema = z
     calendarId: OpaqueIdSchema,
     eventId: z.string().min(1).max(1024),
     account: AccountSchema.optional(),
-    /** Intended start instant (opaque here; provider owns instant grammar). */
-    start: z.string().min(1).max(128),
-    /** Intended end instant (opaque here; provider owns instant grammar). */
-    end: z.string().min(1).max(128),
+    /** Intended start instant (strict RFC3339; provider owns grammar). */
+    start: IsoInstantSchema,
+    /** Intended end instant (strict RFC3339; must be after start). */
+    end: IsoInstantSchema,
     /**
      * EXACT opaque source etag from the committed grant. Must be a real
      * etag: hash-only / updated-only expected revisions are rejected by the
@@ -44,7 +56,9 @@ export const RescheduleEventInputSchema = z
     expectedEtag: z.string().min(1).max(256),
   })
   .superRefine((value, ctx) => {
-    if (value.start === value.end) {
+    const startMs = Date.parse(value.start);
+    const endMs = Date.parse(value.end);
+    if (Number.isNaN(startMs) || Number.isNaN(endMs) || !(endMs > startMs)) {
       ctx.addIssue({
         code: "custom",
         message: "start must be before end",

@@ -56,7 +56,8 @@ export function createRescheduleServer(options: RescheduleServerOptions) {
         expectedEtag: z.string().min(1).max(256),
       },
     },
-    async (args) => {
+    async (args, extra) => {
+      const signal = extra?.signal;
       const parsed = RescheduleEventInputSchema.safeParse(args);
       if (!parsed.success) {
         // Classified before-write outcome: explicit definite_failure payload
@@ -98,9 +99,9 @@ export function createRescheduleServer(options: RescheduleServerOptions) {
       };
       // Read-before-patch: reject recurrence/instances, cancelled/deleted,
       // all-day, missing etag with NO patch dispatched (definite_failure).
-      let current;
+      let current: Awaited<ReturnType<RescheduleProvider["read"]>>;
       try {
-        current = await options.provider.read(target);
+        current = await options.provider.read(target, signal);
       } catch {
         return {
           isError: true,
@@ -123,12 +124,13 @@ export function createRescheduleServer(options: RescheduleServerOptions) {
       }
       // Exact opaque etag tied to the committed grant: the provider performs
       // exactly ONE conditional patch (If-Match); 412 is definite failure.
-      let outcome;
+      let outcome: Awaited<ReturnType<RescheduleProvider["patch"]>>;
       try {
         outcome = await options.provider.patch(
           target,
           { start: input.start, end: input.end },
           { ifMatch: input.expectedEtag },
+          signal,
         );
       } catch {
         return {
@@ -169,20 +171,38 @@ export function createRescheduleServer(options: RescheduleServerOptions) {
   return server;
 }
 
+/** Bounded stdio shutdown budget (real race, not a comment). */
+export const RESCHEDULE_SHUTDOWN_MS = 3000;
+
 /** Stdio entrypoint (separate process from readonly; bounded shutdown). */
 export async function runRescheduleStdio(
   options: RescheduleServerOptions,
 ): Promise<void> {
   const server = createRescheduleServer(options);
   const transport = new StdioServerTransport();
-  const shutdown = async (): Promise<void> => {
-    try {
-      await transport.close();
-    } catch {
-      // Bounded best-effort close; never hangs shutdown.
-    }
+  let closed = false;
+  const closeBounded = async (): Promise<void> => {
+    if (closed) return;
+    closed = true;
+    await Promise.race([
+      (async () => {
+        try {
+          await transport.close();
+        } catch {
+          // Bounded best-effort close; never hangs shutdown.
+        }
+        try {
+          await server.close();
+        } catch {
+          // Best effort.
+        }
+      })(),
+      new Promise<void>((resolve) => {
+        setTimeout(resolve, RESCHEDULE_SHUTDOWN_MS).unref?.();
+      }),
+    ]);
   };
-  process.on("SIGINT", () => void shutdown());
-  process.on("SIGTERM", () => void shutdown());
+  process.on("SIGINT", () => void closeBounded());
+  process.on("SIGTERM", () => void closeBounded());
   await server.connect(transport);
 }
