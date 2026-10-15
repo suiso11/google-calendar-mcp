@@ -9,8 +9,13 @@
 // Defaults disabled: without the full write credential in the environment
 // the process exits non-zero before listening (no partial surface, no
 // readonly token reuse, no OAuth flow, no scope broadening, no live write
-// at startup). Production Google URL is FIXED (no endpoint override env;
-// `endpointBase` stays unset in this CLI).
+// at startup). Production Google URL is IMMUTABLE: this CLI never reads
+// `M5_RESCHEDULE_TEST_ALLOW_ENDPOINT_OVERRIDE`, `M5_RESCHEDULE_TEST_ENDPOINT_BASE`,
+// or `M5_RESCHEDULE_FORK_CLI`; those flags are ignored (never forwarded,
+// never used as endpoint or token source). Fixture injection is NOT
+// available here: tests use the explicit test-only programmatic runner at
+// `src/tests/helpers/rescheduleTestRunner.ts` (unshipped, outside `bin`),
+// which exercises the SAME production provider + MCP server factory.
 
 import {
   createAccessTokenSupplier,
@@ -40,41 +45,7 @@ async function main(): Promise<void> {
     ...(credential.accessToken !== undefined
       ? { accessToken: credential.accessToken }
       : {}),
-    // Explicit TEST seam only: when the caller sets
-    // `M5_RESCHEDULE_TEST_ALLOW_ENDPOINT_OVERRIDE=1`, the provisioned fake
-    // access token is treated as currently valid (no live OAuth round-trip
-    // at startup or per dispatch in tests). Production never sets this flag.
-    ...(process.env.M5_RESCHEDULE_TEST_ALLOW_ENDPOINT_OVERRIDE === "1" &&
-    credential.accessToken !== undefined &&
-    credential.accessToken.length > 0
-      ? { accessTokenExpiresAtMs: Date.now() + 3_600_000 }
-      : {}),
   });
-  // Explicit TEST seam only: when the caller sets
-  // `M5_RESCHEDULE_TEST_ALLOW_ENDPOINT_OVERRIDE=1`, the loopback fixture
-  // base from `M5_RESCHEDULE_TEST_ENDPOINT_BASE` is used (tests provision a
-  // fake token treated as current above; no live OAuth). Production never
-  // sets this flag, so production always uses the FIXED Google URL +
-  // refresh-before-every-dispatch.
-  const testOverride =
-    process.env.M5_RESCHEDULE_TEST_ALLOW_ENDPOINT_OVERRIDE === "1"
-      ? (process.env.M5_RESCHEDULE_TEST_ENDPOINT_BASE ?? "")
-      : "";
-  const hasCurrentToken =
-    credential.accessToken !== undefined && credential.accessToken.length > 0;
-  if (testOverride.length > 0 && hasCurrentToken) {
-    const provider = createGoogleRescheduleProvider({
-      getAccessToken: () => supplier.getAccessToken(),
-      refreshAccessToken: () => supplier.refreshIfExpired(),
-      account: credential.account,
-      endpointBase: testOverride,
-    });
-    await runRescheduleStdio({
-      provider,
-      credentialScope: credential.grantedScope,
-    });
-    return;
-  }
   try {
     await supplier.refreshIfExpired();
   } catch {
@@ -82,6 +53,8 @@ async function main(): Promise<void> {
     process.exit(2);
     return;
   }
+  // Immutable production endpoint: no `endpointBase` is ever set here, so
+  // the provider always uses the FIXED Google URL from `./provider.js`.
   const provider = createGoogleRescheduleProvider({
     getAccessToken: () => supplier.getAccessToken(),
     // Refresh-before-EACH-operation/dispatch as needed (no PATCH replay):
@@ -90,7 +63,6 @@ async function main(): Promise<void> {
     // source instead of a stale initial-refresh closure.
     refreshAccessToken: () => supplier.refreshIfExpired(),
     account: credential.account,
-    ...(testOverride.length > 0 ? { endpointBase: testOverride } : {}),
   });
   await runRescheduleStdio({
     provider,

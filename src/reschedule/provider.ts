@@ -123,25 +123,27 @@ export const GOOGLE_PATCH_URL = (calendarId: string, eventId: string): string =>
 /* Exact-whitespace write-scope validation (production)                */
 /* ------------------------------------------------------------------ */
 
-/** Write-capable scope tokens (exact token match after whitespace split). */
+/** Write-capable scope token (exact least-privilege: calendar.events only). */
 export const WRITE_SCOPES = [
-  "https://www.googleapis.com/auth/calendar",
   "https://www.googleapis.com/auth/calendar.events",
 ] as const;
 
 /**
- * Validate that a granted-scope string carries a write-capable scope.
- * The granted value is split on EXACT ASCII whitespace runs; each token
- * must equal a write scope exactly. Substring matching is NEVER used, so
- * `.../calendar.events.foo` or `.../calendar.readonly-plus` cannot pass.
- * Readonly tokens (`calendar.readonly`, `calendar.events.readonly`,
- * `calendar.settings.readonly`, ...) are refused: they never contain an
- * exact write token. Empty/missing scope is refused. No OAuth flow is
- * started here and no scope is broadened.
+ * Validate that a granted-scope string carries the exact least-privilege
+ * write scope (`.../calendar.events` ONLY). The granted value is split on
+ * EXACT ASCII whitespace runs; one token must equal the exact write scope.
+ * Substring matching is NEVER used, so `.../calendar.events.foo`,
+ * `.../calendar.readonly-plus`, or the broad `.../calendar` scope cannot
+ * pass. Readonly tokens (`calendar.readonly`, `calendar.events.readonly`,
+ * `calendar.settings.readonly`, ...) are refused: they never contain the
+ * exact write token. Empty/missing scope is refused. Config alone is not a
+ * grant: the live OAuth refresh response `scope` (when present) is verified
+ * separately in `./auth.js`. No OAuth flow is started here and no scope is
+ * broadened.
  */
 export function validateWriteCredential(scope: string | undefined): boolean {
   if (typeof scope !== "string" || scope.length === 0) return false;
   const tokens = scope.split(/[\t\n\f\r ]+/).filter((t) => t.length > 0);
   if (tokens.length === 0) return false;
-  return tokens.some((t) => t === WRITE_SCOPES[0] || t === WRITE_SCOPES[1]);
+  return tokens.some((t) => t === WRITE_SCOPES[0]);
 }

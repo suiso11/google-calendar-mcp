@@ -510,12 +510,15 @@ export function createGoogleRescheduleProvider(
         signal,
         async (res, liveSignal) => {
           if (res.status >= 300 && res.status < 400) {
+            // 3xx AFTER a possibly-dispatched PATCH: UNKNOWN (never
+            // definite). The dispatch already happened, so no definite
+            // no-commit proof exists; never resend, never follow (manual).
             try {
               await res.body?.cancel();
             } catch {
               // Best effort.
             }
-            return { status: "definite_failure", code: "invalid_input" } as const;
+            return { status: "unknown", code: "upstream_unknown" } as const;
           }
           if (res.status === 412) {
             try {

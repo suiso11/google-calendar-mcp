@@ -202,6 +202,13 @@ describe('fork reschedule provider default behavior (injected fetch)', () => {
     const cases: Array<{ name: string; patch: () => Response | Promise<Response> }> = [
       { name: '5xx', patch: () => new Response('{}', { status: 500 }) },
       {
+        // POST-dispatch 3xx (redirect never followed): the PATCH was already
+        // received by the server, so the outcome is UNKNOWN (never definite,
+        // exactly one attempt, no resend, no follow).
+        name: '3xx-after-patch',
+        patch: () => new Response('', { status: 302 }),
+      },
+      {
         name: 'unparseable-2xx',
         patch: () => new Response('not-json{{{', { status: 200 }),
       },

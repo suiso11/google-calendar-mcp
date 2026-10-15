@@ -193,12 +193,32 @@ export function createAccessTokenSupplier(config: WriteCredentialConfig): {
       const parsed = body as {
         access_token?: unknown;
         expires_in?: unknown;
+        scope?: unknown;
+        scopes?: unknown;
       };
       if (
         typeof parsed.access_token !== "string" ||
         parsed.access_token.length === 0
       ) {
         throw new Error("auth_refused: malformed token response");
+      }
+      // Actual-grant verification where the server reports it: when the
+      // refresh response carries a `scope`/`scopes` field, it MUST contain
+      // the exact least-privilege write scope, otherwise the refresh is
+      // refused (config alone never equals a grant; no false authorization
+      // claim). Absent scope field = no claim to verify (accepted).
+      const reportedScope =
+        typeof parsed.scope === "string"
+          ? parsed.scope
+          : Array.isArray(parsed.scopes) &&
+              parsed.scopes.every((s) => typeof s === "string")
+            ? (parsed.scopes as string[]).join(" ")
+            : undefined;
+      if (
+        reportedScope !== undefined &&
+        !validateWriteCredential(reportedScope)
+      ) {
+        throw new Error("auth_refused: write scope not granted");
       }
       current = parsed.access_token;
       const ttl =
