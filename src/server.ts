@@ -59,17 +59,35 @@ export function createRescheduleServer(options: RescheduleServerOptions) {
     async (args) => {
       const parsed = RescheduleEventInputSchema.safeParse(args);
       if (!parsed.success) {
+        // Classified before-write outcome: explicit definite_failure payload
+        // on a NON-error response (transport is intact, so the "no patch"
+        // proof is delivered, not lost). `isError` is reserved for responses
+        // that may have been lost (unknown, never definite).
         return {
-          isError: true,
-          content: [{ type: "text" as const, text: "invalid_input" }],
+          content: [
+            {
+              type: "text" as const,
+              text: JSON.stringify({
+                status: "definite_failure",
+                code: "invalid_input",
+              }),
+            },
+          ],
         };
       }
       // Separate credential namespace + write authorization validation.
       // Reuses NO broad/readonly token implicitly; no auth flow is invoked.
       if (!validateWriteCredential(options.credentialScope)) {
         return {
-          isError: true,
-          content: [{ type: "text" as const, text: "auth_refused" }],
+          content: [
+            {
+              type: "text" as const,
+              text: JSON.stringify({
+                status: "definite_failure",
+                code: "auth_refused",
+              }),
+            },
+          ],
         };
       }
       const input = parsed.data;
@@ -79,7 +97,7 @@ export function createRescheduleServer(options: RescheduleServerOptions) {
         ...(input.account !== undefined ? { account: input.account } : {}),
       };
       // Read-before-patch: reject recurrence/instances, cancelled/deleted,
-      // all-day, missing etag with NO patch dispatched.
+      // all-day, missing etag with NO patch dispatched (definite_failure).
       let current;
       try {
         current = await options.provider.read(target);
@@ -92,8 +110,15 @@ export function createRescheduleServer(options: RescheduleServerOptions) {
       const guard = beforeWriteGuard(current);
       if (guard !== null) {
         return {
-          isError: true,
-          content: [{ type: "text" as const, text: guard }],
+          content: [
+            {
+              type: "text" as const,
+              text: JSON.stringify({
+                status: "definite_failure",
+                code: guard,
+              }),
+            },
+          ],
         };
       }
       // Exact opaque etag tied to the committed grant: the provider performs
@@ -113,7 +138,25 @@ export function createRescheduleServer(options: RescheduleServerOptions) {
       }
       if (outcome.status === "succeeded") {
         return {
-          content: [{ type: "text" as const, text: "succeeded" }],
+          content: [
+            {
+              type: "text" as const,
+              text: JSON.stringify({ status: "succeeded" }),
+            },
+          ],
+        };
+      }
+      if (outcome.status === "definite_failure") {
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: JSON.stringify({
+                status: "definite_failure",
+                code: outcome.code,
+              }),
+            },
+          ],
         };
       }
       return {
