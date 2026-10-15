@@ -1,5 +1,21 @@
 # Changelog
 
+## M5 write-consent (unreleased, additive)
+
+Separate out-of-band write-consent command (`npm run auth:write` ->
+`build/write-auth-server.js`; sources `src/write-auth-server.ts`,
+`src/reschedule/writeAuthServer.ts`, `src/reschedule/writeAuthCli.ts`,
+`src/reschedule/writeTokenStore.ts`): REAL loopback consent
+(`127.0.0.1`, exact redirect, state + PKCE-S256, single-use callback,
+bounded 12-minute default window) for the exact
+`https://www.googleapis.com/auth/calendar.events` scope into the SEPARATE
+`~/.config/google-calendar-mcp-write/tokens.json` (0600, override
+`M5_RESCHEDULE_WRITE_TOKEN_PATH`). Broad/readonly grants are refused and
+persist nothing; the readonly entrypoint, tools, scopes, token file, and
+the pinned `google-calendar-reschedule` / `1.0.0-reschedule.1` wire
+identity are unchanged. No calendar reads/writes; a named TEST event plus
+explicit approval is still required before any reschedule.
+
 ## 3.0.0-readonly.2
 
 Intentional breaking narrow cutover: MCP surface is exactly three event tools (`list-events`, `search-events`, `get-event`); `list-calendars` is removed with no alias or shim. Exact configured `calendarId` values are opaque and forwarded byte-for-byte (no name resolution); the MCP path performs no `calendarList`/`calendars` metadata I/O. Timezone-naive bounds use the explicit `timeZone` when given, else deterministic UTC (no calendar-timezone lookup). Account selection is exactly one account per request (explicit normalized ID, or the sole configured key); multi-account ambiguity and invalid accounts reject before any provider I/O. Fractional explicit-offset bounds keep byte-for-byte preservation. Out-of-band account provisioning remains consent plumbing only, not an MCP read capability. Release identity stays private (`private: true`, version `3.0.0-readonly.2`) and never published to npm.

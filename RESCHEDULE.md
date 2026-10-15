@@ -54,6 +54,32 @@ tests (tests inject a loopback fixture ONLY through
   loopback fixture (see Companion Harness acceptance notes; no live
   Google, no OAuth activation).
 
+## Separate write consent (out-of-band, user-driven)
+
+The reschedule entrypoint never performs OAuth itself: grants are
+provisioned out of band with the dedicated consent command, which reuses
+the existing OAuth client registration for a SEPARATE narrow grant.
+
+- Run: `npm run auth:write -- --account write --port 3500 --ttl-minutes 12 --no-browser`
+  (entry `src/write-auth-server.ts` -> `build/write-auth-server.js`;
+  sources `src/reschedule/writeAuthServer.ts`, `src/reschedule/writeAuthCli.ts`,
+  `src/reschedule/writeTokenStore.ts`).
+- Loopback only (`127.0.0.1`, exact redirect
+  `http://127.0.0.1:<actual-port>/oauth2callback`); preferred ports
+  `3500-3505`, dedicated fallback `3510`. The landing page links to Google;
+  the state-bearing Google URL is never printed.
+- Exact scope `https://www.googleapis.com/auth/calendar.events` only
+  (state + PKCE-S256, single-use callback, 12-minute default window, 1-30
+  minute clamp). Broad (`.../auth/calendar`) and readonly grants are refused
+  and never persisted; a missing scope or refresh token refuses as well.
+- Separate token file `~/.config/google-calendar-mcp-write/tokens.json`
+  (override `M5_RESCHEDULE_WRITE_TOKEN_PATH`, 0600, multi-account merge).
+  The readonly token file is never read or written; startup refuses when
+  both paths resolve equal.
+- No calendar reads/writes happen here and no write flags are enabled; a
+  named TEST event plus explicit approval is still required before any
+  reschedule.
+
 ## Review hardening (fork PR3 review 5532918829, implemented as ground truth)
 
 - Wildcard/list/stale etags never dispatch: `expectedEtag` must be an exact

@@ -39,6 +39,7 @@
     "build:reschedule": "node scripts/build.js --reschedule-only",
     "start:reschedule": "node build/reschedule-cli.js",
     "auth": "node build/auth-server.js",
+    "auth:write": "node build/write-auth-server.js",
     "account": "node scripts/account-manager.js",
     "dev": "node scripts/dev.js",
     "lint": "tsc --noEmit -p tsconfig.lint.json",

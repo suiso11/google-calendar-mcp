@@ -56,6 +56,27 @@ const rescheduleBuildOptions = {
   sourcemap: true,
 };
 
+// M5 SEPARATE write-consent entrypoint (ADDITIVE, separate bundle).
+// Out-of-band user consent only (`src/write-auth-server.ts` -> 
+// `build/write-auth-server.js`, script `npm run auth:write`): REAL loopback
+// consent for the exact write scope into the SEPARATE write token file.
+// Registers no MCP tools, performs no calendar reads/writes, never touches
+// the readonly bundles above.
+/** @type {import('esbuild').BuildOptions} */
+const writeAuthBuildOptions = {
+  entryPoints: [join(__dirname, '../src/write-auth-server.ts')],
+  bundle: true,
+  platform: 'node',
+  target: 'node18',
+  outfile: join(__dirname, '../build/write-auth-server.js'),
+  format: 'esm',
+  banner: {
+    js: '#!/usr/bin/env node\n',
+  },
+  packages: 'external', // Don't bundle node_modules
+  sourcemap: true,
+};
+
 const rescheduleOnly = process.argv.includes('--reschedule-only');
 
 if (isWatch) {
@@ -75,7 +96,8 @@ if (isWatch) {
   await Promise.all([
     esbuild.build(buildOptions),
     esbuild.build(authServerBuildOptions),
-    esbuild.build(rescheduleBuildOptions)
+    esbuild.build(rescheduleBuildOptions),
+    esbuild.build(writeAuthBuildOptions)
   ]);
 
   // Make the file executable on non-Windows platforms
@@ -83,6 +105,7 @@ if (isWatch) {
     const { chmod } = await import('fs/promises');
     await chmod(buildOptions.outfile, 0o755);
     await chmod(rescheduleBuildOptions.outfile, 0o755);
+    await chmod(writeAuthBuildOptions.outfile, 0o755);
   }
 
   // Copy static files (HTML, CSS, etc.) to build directory

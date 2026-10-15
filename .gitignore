@@ -3,6 +3,9 @@ build/
 *.log
 gcp-oauth.keys.json
 .gcp-saved-tokens.json
+# M5 separate write-consent grants (never commit)
+*-write-tokens.json
+google-calendar-mcp-write/
 coverage/
 .nyc_output/
 coverage/
