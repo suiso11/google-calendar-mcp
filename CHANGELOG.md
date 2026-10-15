@@ -1,5 +1,14 @@
 # Changelog
 
+## M5 all-day conversion (unreleased, additive)
+
+Valid all-day sources CONVERT to timed (strict YYYY-MM-DD bounds retained,
+exclusive end > start; malformed/mixed bounds are `invalid_input` with NO
+patch). The conditional PATCH sends start/end ONLY with exact `If-Match`;
+all-day conversions clear the stale field (`date: null` + new `dateTime`,
+timed sources keep `dateTime`-only). Etag/recurrence/cancelled/412/unknown
+guards are unchanged. No live Google writes in tests (injected fetch only).
+
 ## M5 write-consent (unreleased, additive)
 
 Separate out-of-band write-consent command (`npm run auth:write` ->

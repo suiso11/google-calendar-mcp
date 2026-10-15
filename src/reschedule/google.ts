@@ -25,8 +25,10 @@
 //     `unknown` — no patch was dispatched, so the proof is intact).
 //   - Read transport loss / malformed / oversize BEFORE any dispatch:
 //     definite (no patch dispatched), never `unknown`-as-commit.
-//   - Shape rejects (recurring/instance, cancelled/deleted, all-day,
-//     missing etag): before-write definite codes with NO patch dispatched.
+//   - Shape rejects (recurring/instance, cancelled/deleted, malformed or
+//     mixed all-day bounds, missing etag): before-write definite codes
+//     with NO patch dispatched. Valid all-day sources CONVERT to timed
+//     (PATCH clears `date: null` + new `dateTime`).
 //   - PATCH start/end ONLY with `If-Match: <exact etag>`; 412 is definite
 //     `etag_mismatch` (provider proves NO patch was applied).
 //   - 5xx / timeout / abort / disconnect / malformed-2xx AFTER a possible
@@ -36,6 +38,8 @@
 import {
   googleEventUrl,
   isExactEtagCandidate,
+  isStrictCalendarDate,
+  isValidAllDaySource,
   type RescheduleObservation,
   type ReschedulePatch,
   type RescheduleProvider,
@@ -88,6 +92,16 @@ function parseTimedInstant(value: string): number | undefined {
   return Number.isNaN(ms) ? undefined : ms;
 }
 
+function isAllDayDateEndpoint(value: unknown): value is { date: string } {
+  if (typeof value !== "object" || value === null) return false;
+  const v = value as { date?: unknown; dateTime?: unknown };
+  return (
+    typeof v.date === "string" &&
+    v.dateTime === undefined &&
+    isStrictCalendarDate(v.date)
+  );
+}
+
 /** Exact Google events.shape normalization (strict; rejects unsupported). */
 export function normalizeGoogleObservation(
   raw: unknown,
@@ -115,10 +129,9 @@ export function normalizeGoogleObservation(
   const status: RescheduleObservation["status"] = statusRaw;
   const recurring =
     body.recurrence !== undefined || body.recurringEventId !== undefined;
-  const allDay = !isTimedEndpoint(body.start) || !isTimedEndpoint(body.end);
-  let start = "";
-  let end = "";
-  if (!allDay) {
+  const timedStart = isTimedEndpoint(body.start);
+  const timedEnd = isTimedEndpoint(body.end);
+  if (timedStart && timedEnd) {
     const s = (body.start as { dateTime: string }).dateTime;
     const e = (body.end as { dateTime: string }).dateTime;
     const sMs = parseTimedInstant(s);
@@ -126,10 +139,32 @@ export function normalizeGoogleObservation(
     if (sMs === undefined || eMs === undefined || !(eMs > sMs)) {
       throw new Error("malformed_response");
     }
-    start = s;
-    end = e;
+    return { etag, status, start: s, end: e, recurring, allDay: false };
   }
-  return { etag, status, start, end, recurring, allDay };
+  // All-day source: BOTH endpoints must be strict YYYY-MM-DD `date`
+  // bounds (mixed timed/date or malformed dates are shape rejects with NO
+  // patch). Bounds are retained so the caller can prove the conversion
+  // source; exclusive end must be strictly after inclusive start.
+  if (isAllDayDateEndpoint(body.start) && isAllDayDateEndpoint(body.end)) {
+    const startDate = (body.start as { date: string }).date;
+    const endDate = (body.end as { date: string }).date;
+    const startMs = Date.parse(`${startDate}T00:00:00Z`);
+    const endMs = Date.parse(`${endDate}T00:00:00Z`);
+    if (Number.isNaN(startMs) || Number.isNaN(endMs) || !(endMs > startMs)) {
+      throw new Error("malformed_response");
+    }
+    return {
+      etag,
+      status,
+      start: "",
+      end: "",
+      recurring,
+      allDay: true,
+      startDate,
+      endDate,
+    };
+  }
+  throw new Error("malformed_response");
 }
 
 /** Rejection bound to a live deadline signal (never hangs past the bound). */
@@ -492,8 +527,12 @@ export function createGoogleRescheduleProvider(
     if (current.status === "deleted") {
       return { status: "definite_failure", code: "deleted_unsupported" };
     }
-    if (current.allDay) {
-      return { status: "definite_failure", code: "allday_unsupported" };
+    // All-day → timed conversion is supported: a valid all-day source
+    // passes (malformed all-day bounds are `invalid_input` with NO
+    // dispatch). The timed-target instants were already validated strictly
+    // by the MCP schema; the source bounds above prove the conversion.
+    if (!isValidAllDaySource(current)) {
+      return { status: "definite_failure", code: "invalid_input" };
     }
     // EXACTLY ONE conditional PATCH: start/end ONLY + If-Match exact etag.
     // Refresh-before-dispatch again here: the pre-read refresh may have aged
@@ -514,6 +553,20 @@ export function createGoogleRescheduleProvider(
       target.eventId,
       options.endpointBase,
     );
+    // EXACTLY ONE conditional PATCH: start/end ONLY + If-Match exact etag.
+    // All-day → timed conversion clears the stale `date` field explicitly
+    // (`date: null` + new `dateTime`, mirroring the existing
+    // UpdateEventHandler/RecurringEventHelpers timed-write shape); the pure
+    // timed path sends `dateTime` ONLY with no extra keys.
+    const patchBodyJson = current.allDay
+      ? {
+          start: { date: null, dateTime: patchBody.start },
+          end: { date: null, dateTime: patchBody.end },
+        }
+      : {
+          start: { dateTime: patchBody.start },
+          end: { dateTime: patchBody.end },
+        };
     try {
       return await singleAttempt(
         url,
@@ -524,10 +577,7 @@ export function createGoogleRescheduleProvider(
             "content-type": "application/json",
             "If-Match": opts.ifMatch,
           },
-          body: JSON.stringify({
-            start: { dateTime: patchBody.start },
-            end: { dateTime: patchBody.end },
-          }),
+          body: JSON.stringify(patchBodyJson),
           ...(signal !== undefined ? { signal } : {}),
         },
         fetchImpl,

@@ -162,12 +162,23 @@ describe('fork reschedule provider default behavior (injected fetch)', () => {
         code: 'cancelled_unsupported',
       },
       {
-        name: 'all-day',
+        name: 'malformed-all-day-date',
         get: () =>
           jsonResponse(
-            timedEvent({ start: { date: '2026-02-01' }, end: { date: '2026-02-02' } }),
+            timedEvent({ start: { date: '2026-02-30' }, end: { date: '2026-03-01' } }),
           ),
-        code: 'allday_unsupported',
+        code: 'invalid_input',
+      },
+      {
+        name: 'malformed-all-day-mixed',
+        get: () =>
+          jsonResponse(
+            timedEvent({
+              start: { date: '2026-02-01' },
+              end: { dateTime: '2026-02-01T11:00:00Z' },
+            }),
+          ),
+        code: 'invalid_input',
       },
       {
         name: 'missing-etag',

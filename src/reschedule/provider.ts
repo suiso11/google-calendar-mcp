@@ -21,12 +21,21 @@ export type RescheduleObservation = {
   /** Exact opaque source etag ("" / missing means "no etag": reject). */
   readonly etag: string;
   readonly status: "confirmed" | "tentative" | "cancelled" | "deleted";
+  /** Timed source instants; "" when the source is all-day (see startDate). */
   readonly start: string;
   readonly end: string;
   /** True for recurring masters/instances/exceptions (unsupported). */
   readonly recurring: boolean;
-  /** True for all-day events (unsupported for timed-only reschedule). */
+  /**
+   * True for all-day sources (SUPPORTED for all-day → timed conversion).
+   * Timed sources carry `start`/`end` instants; all-day sources carry
+   * `startDate`/`endDate` YYYY-MM-DD bounds with `start`/`end` empty.
+   */
   readonly allDay: boolean;
+  /** All-day source start bound (YYYY-MM-DD, inclusive; all-day only). */
+  readonly startDate?: string;
+  /** All-day source end bound (YYYY-MM-DD, exclusive; all-day only). */
+  readonly endDate?: string;
 };
 
 export type ReschedulePatch = {
@@ -47,7 +56,6 @@ export const DEFINITE_FAILURE_CODES = [
   "recurring_unsupported",
   "cancelled_unsupported",
   "deleted_unsupported",
-  "allday_unsupported",
   "not_found",
   "auth_refused",
   // Read-transport loss BEFORE any dispatch: definite (no patch was sent,
@@ -82,8 +90,54 @@ export interface RescheduleProvider {
 /* ------------------------------------------------------------------ */
 
 /**
+ * Strict YYYY-MM-DD calendar-date validation (no rollover): month lengths,
+ * leap years, and real calendar days are enforced; `2026-02-30` is rejected.
+ */
+export function isStrictCalendarDate(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const year = Number(value.slice(0, 4));
+  const month = Number(value.slice(5, 7));
+  const day = Number(value.slice(8, 10));
+  if (month < 1 || month > 12) return false;
+  const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const daysInMonth =
+    [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month - 1] ??
+    0;
+  return day >= 1 && day <= daysInMonth;
+}
+
+/**
+ * True when an all-day source observation carries strict, well-ordered
+ * YYYY-MM-DD bounds (inclusive start, exclusive end strictly after start).
+ * Timed-shape leftovers (`start`/`end` non-empty on an all-day source) are
+ * rejected so a malformed source never reaches the wire.
+ */
+export function isValidAllDaySource(
+  observation: RescheduleObservation,
+): boolean {
+  if (!observation.allDay) return true;
+  const { startDate, endDate } = observation;
+  if (typeof startDate !== "string" || typeof endDate !== "string") {
+    return false;
+  }
+  if (!isStrictCalendarDate(startDate) || !isStrictCalendarDate(endDate)) {
+    return false;
+  }
+  const startMs = Date.parse(`${startDate}T00:00:00Z`);
+  const endMs = Date.parse(`${endDate}T00:00:00Z`);
+  if (Number.isNaN(startMs) || Number.isNaN(endMs) || !(endMs > startMs)) {
+    return false;
+  }
+  // All-day sources must not carry timed instants alongside date bounds.
+  if (observation.start !== "" || observation.end !== "") return false;
+  return true;
+}
+
+/**
  * Reject unsupported shapes BEFORE any patch (no patch dispatched):
- * missing etag, recurring, cancelled/deleted, all-day. Returns the fixed
+ * missing etag, recurring, cancelled/deleted, malformed all-day bounds.
+ * All-day → timed conversion is SUPPORTED, so a valid all-day source
+ * passes; a malformed all-day source is `invalid_input`. Returns the fixed
  * definite code or null when the shape is patchable.
  */
 export function beforeWriteGuard(
@@ -93,7 +147,7 @@ export function beforeWriteGuard(
   if (observation.recurring) return "recurring_unsupported";
   if (observation.status === "cancelled") return "cancelled_unsupported";
   if (observation.status === "deleted") return "deleted_unsupported";
-  if (observation.allDay) return "allday_unsupported";
+  if (!isValidAllDaySource(observation)) return "invalid_input";
   return null;
 }
 
