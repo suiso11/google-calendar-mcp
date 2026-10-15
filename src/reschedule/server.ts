@@ -12,9 +12,9 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { z } from "zod";
 import {
   beforeWriteGuard,
+  type RescheduleObservation,
   type RescheduleProvider,
   validateWriteCredential,
 } from "./provider.js";
@@ -41,20 +41,17 @@ export function createRescheduleServer(options: RescheduleServerOptions) {
     { capabilities: { tools: {} } },
   );
 
+  // The advertised JSON schema and the runtime validator are THE SAME
+  // strict schema object (`RescheduleEventInputSchema`): `strictObject`
+  // advertises `additionalProperties: false` on the wire AND rejects unknown
+  // keys at runtime. No separate hand-written shape can drift.
   server.registerTool(
     RESCHEDULE_TOOL_NAME,
     {
       title: "Reschedule event (start/end only, conditional etag)",
       description:
         "Patch an event start/end only, guarded by the exact committed-grant etag (If-Match). No recurring split, no other fields.",
-      inputSchema: {
-        calendarId: z.string().min(1).max(512),
-        eventId: z.string().min(1).max(1024),
-        account: z.string().min(1).max(512).optional(),
-        start: z.string().min(1).max(128),
-        end: z.string().min(1).max(128),
-        expectedEtag: z.string().min(1).max(256),
-      },
+      inputSchema: RescheduleEventInputSchema,
     },
     async (args, extra) => {
       const signal = extra?.signal;
@@ -97,15 +94,37 @@ export function createRescheduleServer(options: RescheduleServerOptions) {
         eventId: input.eventId,
         ...(input.account !== undefined ? { account: input.account } : {}),
       };
-      // Read-before-patch: reject recurrence/instances, cancelled/deleted,
-      // all-day, missing etag with NO patch dispatched (definite_failure).
-      let current: Awaited<ReturnType<RescheduleProvider["read"]>>;
+      // THE single read-before-patch (ONE GET per update): reject
+      // recurrence/instances, cancelled/deleted, all-day, missing etag, and
+      // every classified read error with NO patch dispatched. Read errors
+      // are definite (the no-commit proof is intact — nothing was sent), so
+      // they ride the NON-error definite_failure payload; `isError` stays
+      // reserved for responses that may have been lost (unknown, never
+      // definite). A known read failure is never reported as unknown-commit,
+      // not_found, or auth unless it actually is one.
+      let current: RescheduleObservation;
       try {
         current = await options.provider.read(target, signal);
-      } catch {
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "";
+        const code =
+          message === "auth_refused"
+            ? "auth_refused"
+            : message === "not_found"
+              ? "not_found"
+              : message === "read_transport_lost"
+                ? "read_transport_lost"
+                : "invalid_input";
         return {
-          isError: true,
-          content: [{ type: "text" as const, text: "transport_lost" }],
+          content: [
+            {
+              type: "text" as const,
+              text: JSON.stringify({
+                status: "definite_failure",
+                code,
+              }),
+            },
+          ],
         };
       }
       const guard = beforeWriteGuard(current);
@@ -123,13 +142,14 @@ export function createRescheduleServer(options: RescheduleServerOptions) {
         };
       }
       // Exact opaque etag tied to the committed grant: the provider performs
-      // exactly ONE conditional patch (If-Match); 412 is definite failure.
+      // exactly ONE conditional patch (If-Match) reusing this observation —
+      // no second GET. 412 is definite failure.
       let outcome: Awaited<ReturnType<RescheduleProvider["patch"]>>;
       try {
         outcome = await options.provider.patch(
           target,
           { start: input.start, end: input.end },
-          { ifMatch: input.expectedEtag },
+          { ifMatch: input.expectedEtag, current },
           signal,
         );
       } catch {

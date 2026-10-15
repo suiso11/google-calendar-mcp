@@ -50,6 +50,9 @@ export const DEFINITE_FAILURE_CODES = [
   "allday_unsupported",
   "not_found",
   "auth_refused",
+  // Read-transport loss BEFORE any dispatch: definite (no patch was sent,
+  // so the no-commit proof is intact — never `unknown`-as-commit).
+  "read_transport_lost",
 ] as const;
 
 export interface RescheduleProvider {
@@ -66,7 +69,7 @@ export interface RescheduleProvider {
   patch(
     target: RescheduleTarget,
     patch: ReschedulePatch,
-    options: { readonly ifMatch: string },
+    options: { readonly ifMatch: string; readonly current?: RescheduleObservation },
     signal?: AbortSignal,
   ): Promise<ProviderOutcome>;
 }

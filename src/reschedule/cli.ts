@@ -40,13 +40,22 @@ async function main(): Promise<void> {
     ...(credential.accessToken !== undefined
       ? { accessToken: credential.accessToken }
       : {}),
+    // Explicit TEST seam only: when the caller sets
+    // `M5_RESCHEDULE_TEST_ALLOW_ENDPOINT_OVERRIDE=1`, the provisioned fake
+    // access token is treated as currently valid (no live OAuth round-trip
+    // at startup or per dispatch in tests). Production never sets this flag.
+    ...(process.env.M5_RESCHEDULE_TEST_ALLOW_ENDPOINT_OVERRIDE === "1" &&
+    credential.accessToken !== undefined &&
+    credential.accessToken.length > 0
+      ? { accessTokenExpiresAtMs: Date.now() + 3_600_000 }
+      : {}),
   });
   // Explicit TEST seam only: when the caller sets
   // `M5_RESCHEDULE_TEST_ALLOW_ENDPOINT_OVERRIDE=1`, the loopback fixture
-  // base from `M5_RESCHEDULE_TEST_ENDPOINT_BASE` is used AND the refresh
-  // round-trip is skipped when a current access token is already present
-  // (tests provision a fake token; no live OAuth). Production never sets
-  // this flag, so production always uses the FIXED Google URL + refresh.
+  // base from `M5_RESCHEDULE_TEST_ENDPOINT_BASE` is used (tests provision a
+  // fake token treated as current above; no live OAuth). Production never
+  // sets this flag, so production always uses the FIXED Google URL +
+  // refresh-before-every-dispatch.
   const testOverride =
     process.env.M5_RESCHEDULE_TEST_ALLOW_ENDPOINT_OVERRIDE === "1"
       ? (process.env.M5_RESCHEDULE_TEST_ENDPOINT_BASE ?? "")
@@ -56,6 +65,7 @@ async function main(): Promise<void> {
   if (testOverride.length > 0 && hasCurrentToken) {
     const provider = createGoogleRescheduleProvider({
       getAccessToken: () => supplier.getAccessToken(),
+      refreshAccessToken: () => supplier.refreshIfExpired(),
       account: credential.account,
       endpointBase: testOverride,
     });
@@ -74,6 +84,11 @@ async function main(): Promise<void> {
   }
   const provider = createGoogleRescheduleProvider({
     getAccessToken: () => supplier.getAccessToken(),
+    // Refresh-before-EACH-operation/dispatch as needed (no PATCH replay):
+    // the provider awaits this before every GET and every PATCH, so a token
+    // that ages out mid-process is renewed from a truly current lifecycle
+    // source instead of a stale initial-refresh closure.
+    refreshAccessToken: () => supplier.refreshIfExpired(),
     account: credential.account,
     ...(testOverride.length > 0 ? { endpointBase: testOverride } : {}),
   });

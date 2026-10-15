@@ -68,20 +68,3 @@ export const RescheduleEventInputSchema = z
   });
 
 export type RescheduleEventInput = z.infer<typeof RescheduleEventInputSchema>;
-
-/** Canonical JSON input schema (for binding-identity hashing). */
-export function rescheduleInputJsonSchema(): Record<string, unknown> {
-  return {
-    type: "object",
-    properties: {
-      calendarId: { type: "string", minLength: 1, maxLength: 512 },
-      eventId: { type: "string", minLength: 1, maxLength: 1024 },
-      account: { type: "string", minLength: 1, maxLength: 512 },
-      start: { type: "string", minLength: 1, maxLength: 128 },
-      end: { type: "string", minLength: 1, maxLength: 128 },
-      expectedEtag: { type: "string", minLength: 1, maxLength: 256 },
-    },
-    required: ["calendarId", "eventId", "start", "end", "expectedEtag"],
-    additionalProperties: false,
-  };
-}

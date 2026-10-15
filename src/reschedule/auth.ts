@@ -11,12 +11,15 @@
 // (`M5_RESCHEDULE_GRANTED_SCOPE`). `getValidAccessToken` returns the
 // current in-memory/file access token when unexpired, otherwise performs
 // ONE RFC6749 refresh_token grant BEFORE dispatch (single fetch, bounded
-// timeout, no retry) and persists ONLY the separate `M5_RESCHEDULE_*`
-// token file using the existing secure pattern (0600). No live
-// Google/OAuth invocation happens at import or in tests unless the caller
-// explicitly configures a token endpoint; unit tests point
-// `tokenEndpoint` at a local fake.
+// timeout AND bounded body, no retry) and persists ONLY the separate
+// `M5_RESCHEDULE_*` token file using the existing secure pattern (0600).
+// The same file is READ back at supplier creation (secure persistence, not
+// write-only): an explicit `accessToken` in the config still wins over the
+// file. No live Google/OAuth invocation happens at import or in tests
+// unless the caller explicitly configures a token endpoint; unit tests
+// point `tokenEndpoint` at a local fake.
 
+import { readFileSync } from "node:fs";
 import { validateWriteCredential } from "./provider.js";
 
 export interface WriteCredentialConfig {
@@ -74,13 +77,60 @@ export function loadWriteCredentialFromEnv(
   };
 }
 
+/** Bound on the token-refresh response body (never unbounded). */
+export const TOKEN_RESPONSE_MAX_BYTES = 64 * 1024;
+
+/**
+ * Read back the separately persisted write token (secure persistence, not
+ * write-only). Returns null when the file is absent/unparseable — the
+ * caller then falls back to an explicit token or a fresh refresh. Never
+ * throws, never logs paths or contents.
+ */
+function readPersistedWriteToken(
+  tokenFile: string,
+): { accessToken: string; expiresAt: number } | null {
+  let raw: string;
+  try {
+    raw = readFileSync(tokenFile, "utf-8");
+  } catch {
+    return null;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw) as unknown;
+  } catch {
+    return null;
+  }
+  if (typeof parsed !== "object" || parsed === null) return null;
+  const body = parsed as { accessToken?: unknown; expiresAt?: unknown };
+  if (
+    typeof body.accessToken !== "string" ||
+    body.accessToken.length === 0 ||
+    typeof body.expiresAt !== "number" ||
+    !Number.isFinite(body.expiresAt)
+  ) {
+    return null;
+  }
+  return { accessToken: body.accessToken, expiresAt: body.expiresAt };
+}
+
 /** Create a before-dispatch token supplier (refresh BEFORE any GET/PATCH). */
 export function createAccessTokenSupplier(config: WriteCredentialConfig): {
   getAccessToken: () => string;
   refreshIfExpired: () => Promise<void>;
 } {
-  let current = config.accessToken ?? "";
-  let expiresAt = config.accessTokenExpiresAtMs ?? 0;
+  // Secure persistence read-back: the file written by a previous refresh
+  // seeds the supplier when no explicit access token is configured. An
+  // explicit `accessToken` always wins over the file.
+  const persisted =
+    (config.accessToken === undefined || config.accessToken.length === 0) &&
+    config.tokenFile !== undefined
+      ? readPersistedWriteToken(config.tokenFile)
+      : null;
+  let current =
+    config.accessToken ?? persisted?.accessToken ?? "";
+  let expiresAt =
+    config.accessTokenExpiresAtMs ?? persisted?.expiresAt ?? 0;
   const fetchImpl = config.fetchImpl ?? fetch;
   const timeoutMs = config.timeoutMs ?? 10_000;
 
@@ -110,23 +160,50 @@ export function createAccessTokenSupplier(config: WriteCredentialConfig): {
         },
       );
       if (res.status >= 300 && res.status < 400) {
+        try {
+          await res.body?.cancel();
+        } catch {
+          // Best effort.
+        }
         throw new Error("auth_refused: token redirect refused");
       }
-      if (!res.ok) throw new Error("auth_refused: token refresh failed");
-      const body = (await res.json()) as {
+      if (!res.ok) {
+        try {
+          await res.body?.cancel();
+        } catch {
+          // Best effort.
+        }
+        throw new Error("auth_refused: token refresh failed");
+      }
+      // Bounded refresh body: same deadline signal, hard size cap, then
+      // strict JSON parse. An oversize/hanging/malformed refresh body is a
+      // refusal (no token is minted), never an unbounded read.
+      let raw: string;
+      try {
+        raw = await readBoundedRefreshBody(res, controller.signal);
+      } catch {
+        throw new Error("auth_refused: malformed token response");
+      }
+      let body: unknown;
+      try {
+        body = JSON.parse(raw) as unknown;
+      } catch {
+        throw new Error("auth_refused: malformed token response");
+      }
+      const parsed = body as {
         access_token?: unknown;
         expires_in?: unknown;
       };
       if (
-        typeof body.access_token !== "string" ||
-        body.access_token.length === 0
+        typeof parsed.access_token !== "string" ||
+        parsed.access_token.length === 0
       ) {
         throw new Error("auth_refused: malformed token response");
       }
-      current = body.access_token;
+      current = parsed.access_token;
       const ttl =
-        typeof body.expires_in === "number" && Number.isFinite(body.expires_in)
-          ? body.expires_in
+        typeof parsed.expires_in === "number" && Number.isFinite(parsed.expires_in)
+          ? parsed.expires_in
           : 3600;
       expiresAt = Date.now() + Math.max(0, ttl) * 1000;
       if (config.tokenFile !== undefined) {
@@ -148,4 +225,78 @@ export function createAccessTokenSupplier(config: WriteCredentialConfig): {
   }
 
   return { getAccessToken, refreshIfExpired };
+}
+
+/**
+ * Bounded refresh-body read under the live refresh deadline: chunks race
+ * the same abort signal (headers-delivered hanging bodies cannot outlive
+ * the deadline) and oversize bodies cancel the stream. Single attempt.
+ */
+async function readBoundedRefreshBody(
+  res: Response,
+  signal: AbortSignal,
+): Promise<string> {
+  const reader = res.body?.getReader();
+  if (reader === undefined) {
+    if (signal.aborted) throw new Error("transport_lost");
+    const text = await res.text();
+    if (signal.aborted) throw new Error("transport_lost");
+    if (text.length > TOKEN_RESPONSE_MAX_BYTES) {
+      throw new Error("response_too_large");
+    }
+    return text;
+  }
+  let onAbort: (() => void) | undefined;
+  const aborted = new Promise<never>((_, reject) => {
+    onAbort = () => reject(new Error("transport_lost"));
+    if (signal.aborted) {
+      onAbort();
+    } else {
+      signal.addEventListener("abort", onAbort, { once: true });
+    }
+  });
+  try {
+    const chunks: Uint8Array[] = [];
+    let total = 0;
+    for (;;) {
+      let next: ReadableStreamReadResult<Uint8Array>;
+      try {
+        next = await Promise.race([reader.read(), aborted]);
+      } catch {
+        try {
+          await reader.cancel();
+        } catch {
+          // Best effort.
+        }
+        throw new Error("transport_lost");
+      }
+      if (next.done) break;
+      total += next.value.byteLength;
+      if (total > TOKEN_RESPONSE_MAX_BYTES) {
+        try {
+          await reader.cancel();
+        } catch {
+          // Best effort.
+        }
+        throw new Error("response_too_large");
+      }
+      chunks.push(next.value);
+    }
+    const merged = new Uint8Array(total);
+    let offset = 0;
+    for (const c of chunks) {
+      merged.set(c, offset);
+      offset += c.byteLength;
+    }
+    return new TextDecoder().decode(merged);
+  } finally {
+    if (onAbort !== undefined) {
+      signal.removeEventListener("abort", onAbort);
+    }
+    try {
+      reader.releaseLock();
+    } catch {
+      // Best effort.
+    }
+  }
 }
