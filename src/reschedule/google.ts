@@ -129,6 +129,13 @@ export function normalizeGoogleObservation(
   const status: RescheduleObservation["status"] = statusRaw;
   const recurring =
     body.recurrence !== undefined || body.recurringEventId !== undefined;
+  // Sparse cancelled: Google may omit start/end on cancelled events. Classify
+  // BEFORE requiring timed/all-day bounds so the caller reports the existing
+  // `cancelled_unsupported` outcome (0 PATCH) instead of `invalid_input`.
+  // Strict bounds remain required for non-cancelled observations below.
+  if (status === "cancelled") {
+    return { etag, status, start: "", end: "", recurring, allDay: false };
+  }
   const timedStart = isTimedEndpoint(body.start);
   const timedEnd = isTimedEndpoint(body.end);
   if (timedStart && timedEnd) {

@@ -15,7 +15,7 @@ interface SearchEventsArgs {
     fields?: string[];
     privateExtendedProperty?: string[];
     sharedExtendedProperty?: string[];
-    account?: string | string[];
+    account?: string;
     pageSize?: number;
     pageToken?: string;
 }
@@ -27,6 +27,12 @@ export class SearchEventsHandler extends BaseToolHandler {
             throw new McpError(
                 ErrorCode.InvalidRequest,
                 'No authenticated accounts available. Please run authentication first.'
+            );
+        }
+        if (Array.isArray(args.account)) {
+            throw new McpError(
+                ErrorCode.InvalidRequest,
+                'search-events requires exactly one account string (arrays are rejected).'
             );
         }
         const accountIds = this.normalizeAccountIds(args.account);
@@ -80,6 +86,9 @@ export class SearchEventsHandler extends BaseToolHandler {
 
         try {
             // Exactly one events.list call; no auto-pagination, no batch, no merge.
+            // Bounded page: omitted pageSize defaults to 20 so the provider
+            // never returns its larger default page. Valid 1..20 is honored
+            // (schema-enforced); output stays one page.
             const response = await calendar.events.list({
                 calendarId,
                 ...(args.query !== undefined && { q: args.query }),
@@ -87,10 +96,10 @@ export class SearchEventsHandler extends BaseToolHandler {
                 timeMax,
                 singleEvents: true,
                 orderBy: 'startTime',
+                maxResults: args.pageSize ?? 20,
                 ...(fieldMask && { fields: fieldMask }),
                 ...(args.privateExtendedProperty && { privateExtendedProperty: args.privateExtendedProperty as any }),
                 ...(args.sharedExtendedProperty && { sharedExtendedProperty: args.sharedExtendedProperty as any }),
-                ...(args.pageSize !== undefined && { maxResults: args.pageSize }),
                 ...(args.pageToken !== undefined && { pageToken: args.pageToken })
             });
 

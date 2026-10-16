@@ -234,7 +234,8 @@ describe('Google Calendar MCP Server', () => {
         timeMin: listEventsArgs.timeMin,
         timeMax: listEventsArgs.timeMax,
         singleEvents: true,
-        orderBy: 'startTime'
+        orderBy: 'startTime',
+        maxResults: 20
       });
 
       // Should return structured JSON with events

@@ -118,6 +118,7 @@ function readPersistedWriteToken(
 export function createAccessTokenSupplier(config: WriteCredentialConfig): {
   getAccessToken: () => string;
   refreshIfExpired: () => Promise<void>;
+  getExpiresAtMs: () => number;
 } {
   // Secure persistence read-back: the file written by a previous refresh
   // seeds the supplier when no explicit access token is configured. An
@@ -137,6 +138,10 @@ export function createAccessTokenSupplier(config: WriteCredentialConfig): {
   function getAccessToken(): string {
     if (current.length === 0) throw new Error("auth_refused: no access token");
     return current;
+  }
+
+  function getExpiresAtMs(): number {
+    return expiresAt;
   }
 
   async function refreshIfExpired(): Promise<void> {
@@ -244,7 +249,7 @@ export function createAccessTokenSupplier(config: WriteCredentialConfig): {
     }
   }
 
-  return { getAccessToken, refreshIfExpired };
+  return { getAccessToken, refreshIfExpired, getExpiresAtMs };
 }
 
 /**

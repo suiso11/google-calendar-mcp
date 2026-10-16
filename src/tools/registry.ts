@@ -239,7 +239,7 @@ const multiAccountSchema = z.preprocess(
 // Define all tool schemas with TypeScript inference
 export const ToolSchemas = {
   'list-events': z.object({
-    account: multiAccountSchema,
+    account: singleAccountSchema,
     calendarId: z.string().min(1, "Calendar ID must be a non-empty string").describe(
       "Exact calendar ID to query (e.g., 'primary', 'user@gmail.com', or an opaque calendar ID). Forwarded verbatim; calendar names are not resolved."
     ),
@@ -258,7 +258,7 @@ export const ToolSchemas = {
   }),
   
   'search-events': z.object({
-    account: multiAccountSchema,
+    account: singleAccountSchema,
     calendarId: z.string().min(1, "Calendar ID must be a non-empty string").describe(
       "Exact calendar ID to search (e.g., 'primary', 'user@gmail.com', or an opaque calendar ID). Forwarded verbatim; calendar names are not resolved."
     ),

@@ -1,5 +1,20 @@
 # Changelog
 
+## PR4 review fixes (unreleased, additive)
+
+- Persisted `auth:write` grant authorizes the reschedule runtime: the
+  per-account grant in the SEPARATE token file loads with the existing OAuth
+  client registration into the CLI, refreshed access tokens persist back
+  into the SAME file (atomic merge, other accounts kept, 0600), and
+  missing/ambiguous/readonly/broad grants plus any partial env credential
+  refuse closed (no readonly-token reuse, no TEST endpoint override).
+- Omitted `pageSize` sends bounded `maxResults: 20` (one page, no eager
+  pagination); explicit 1..20 honored.
+- `list-events`/`search-events` advertise and enforce exactly one optional
+  account string (arrays rejected at schema AND runtime before provider I/O).
+- Sparse cancelled GETs classify `cancelled_unsupported` before bounds
+  checks (0 PATCH); strict bounds still required for non-cancelled events.
+
 ## M5 all-day conversion (unreleased, additive)
 
 Valid all-day sources CONVERT to timed (strict YYYY-MM-DD bounds retained,

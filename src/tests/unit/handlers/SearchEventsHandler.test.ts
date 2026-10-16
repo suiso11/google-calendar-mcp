@@ -197,10 +197,10 @@ describe('SearchEventsHandler single-calendar pagination', () => {
     expect(response.totalCount).toBe(0);
   });
 
-  it('should omit maxResults/pageToken when not provided (no auto-pagination)', async () => {
+  it('should send bounded maxResults 20 when pageSize omitted (no auto-pagination)', async () => {
     await handler.runTool({ ...baseArgs, query: 'Team' }, mockAccounts);
     const callArgs = mockCalendar.events.list.mock.calls[0][0];
-    expect('maxResults' in callArgs).toBe(false);
+    expect(callArgs.maxResults).toBe(20);
     expect('pageToken' in callArgs).toBe(false);
     expect(mockCalendar.events.list).toHaveBeenCalledTimes(1);
   });
@@ -211,7 +211,7 @@ describe('SearchEventsHandler single-calendar pagination', () => {
       ['personal', mockOAuth2Client]
     ]);
     await expect(handler.runTool(
-      { ...baseArgs, query: 'Team', account: ['work', 'personal'] },
+      { ...baseArgs, query: 'Team', account: ['work', 'personal'] } as any,
       multi
     )).rejects.toThrow(/exactly one account/i);
     expect(mockCalendar.events.list).not.toHaveBeenCalled();

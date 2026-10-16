@@ -80,6 +80,25 @@ the existing OAuth client registration for a SEPARATE narrow grant.
   named TEST event plus explicit approval is still required before any
   reschedule.
 
+## Review hardening (fork PR4 review, implemented as ground truth)
+
+- Persisted-grant runtime: the per-account `auth:write` grant loads with the
+  existing OAuth client registration into the CLI (`resolveWriteRuntimeCredential`);
+  refreshed tokens persist back into the SAME per-account file (atomic merge,
+  0600, other accounts kept). Partial env credentials and
+  missing/ambiguous/readonly/broad grants refuse closed; TEST endpoint
+  overrides are never read by the shipped CLI.
+- Default-surface bounds: omitted `pageSize` sends `maxResults: 20` (one
+  page, no eager pagination); `list-events`/`search-events` advertise and
+  enforce exactly one optional account string (no multi-account array).
+- Sparse cancelled GETs report `cancelled_unsupported` (0 PATCH) before
+  bounds requirements; strict bounds still apply to non-cancelled events.
+- Scope note: the DEFAULT entrypoint (`google-calendar` / `build/index.js`)
+  still exposes EXACTLY the three readonly tools (see default smoke in
+  acceptance notes). The separate opt-in entrypoint above exists under
+  explicit user authorization per merged PR3 discussion 4283103241 and is NOT
+  a widening of the default surface.
+
 ## Review hardening (fork PR3 review 5532918829, implemented as ground truth)
 
 - Wildcard/list/stale etags never dispatch: `expectedEtag` must be an exact

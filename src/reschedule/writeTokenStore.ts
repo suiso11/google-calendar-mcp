@@ -9,7 +9,7 @@
 // created 0600 and re-chmodded 0600 (private, owner-only). No live
 // Google/OAuth invocation happens here; this is file persistence only.
 
-import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import type { Credentials } from "google-auth-library";
@@ -70,6 +70,96 @@ async function readWriteTokenFile(tokenPath: string): Promise<WriteTokenFile> {
     throw new Error(WRITE_TOKEN_REFUSALS.unreadable);
   }
   return parsed as WriteTokenFile;
+}
+
+/**
+ * Load the persisted per-account write grant for the runtime (fail closed).
+ * Rejects missing accounts, unreadable files, and readonly/broad/mismatched
+ * grants with fixed messages (never paths, scopes, or token bytes). Callers
+ * combine the returned grant with the existing OAuth client registration;
+ * no OAuth flow is started here.
+ */
+export async function loadWriteStoredGrant(
+  account: string,
+  tokenPath: string,
+): Promise<WriteStoredGrant> {
+  try {
+    validateAccountId(account);
+  } catch {
+    throw new Error(WRITE_TOKEN_REFUSALS.invalidAccount);
+  }
+  const current = await readWriteTokenFile(tokenPath).catch(() => {
+    throw new Error(WRITE_TOKEN_REFUSALS.unreadable);
+  });
+  const grant = current[account];
+  if (grant === undefined) {
+    throw new Error(WRITE_TOKEN_REFUSALS.unreadable);
+  }
+  const scope =
+    typeof grant.scope === "string" ? grant.scope : undefined;
+  const refresh =
+    typeof grant.refresh_token === "string" ? grant.refresh_token : undefined;
+  if (
+    scope === undefined ||
+    !validateWriteCredential(scope) ||
+    refresh === undefined ||
+    refresh.length === 0
+  ) {
+    throw new Error(WRITE_TOKEN_REFUSALS.invalidGrant);
+  }
+  return grant;
+}
+
+/**
+ * Persist a refreshed access token back into the per-account store
+ * (atomic merge, 0600). Other accounts are preserved; a corrupt existing
+ * file refuses rather than clobbering. Never writes the single-token
+ * supplier format over the per-account file.
+ */
+export async function updateWriteStoredAccessToken(
+  account: string,
+  accessToken: string,
+  expiresAtMs: number,
+  tokenPath: string,
+): Promise<void> {
+  try {
+    validateAccountId(account);
+  } catch {
+    throw new Error(WRITE_TOKEN_REFUSALS.invalidAccount);
+  }
+  if (typeof accessToken !== "string" || accessToken.length === 0) {
+    throw new Error(WRITE_TOKEN_REFUSALS.invalidGrant);
+  }
+  if (!Number.isFinite(expiresAtMs)) {
+    throw new Error(WRITE_TOKEN_REFUSALS.invalidGrant);
+  }
+  const current = await readWriteTokenFile(tokenPath);
+  const existing = current[account];
+  if (existing === undefined) {
+    throw new Error(WRITE_TOKEN_REFUSALS.unreadable);
+  }
+  const next: WriteTokenFile = {
+    ...current,
+    [account]: {
+      ...existing,
+      access_token: accessToken,
+      expiry_date: Math.floor(expiresAtMs),
+    },
+  };
+  await mkdir(dirname(tokenPath), { recursive: true });
+  const tmpPath = `${tokenPath}.tmp.${process.pid}`;
+  await writeFile(tmpPath, JSON.stringify(next, null, 2), { mode: 0o600 });
+  try {
+    await chmod(tmpPath, 0o600);
+  } catch {
+    // Best effort: the file was already created 0600.
+  }
+  await rename(tmpPath, tokenPath);
+  try {
+    await chmod(tokenPath, 0o600);
+  } catch {
+    // Best effort.
+  }
 }
 
 /**

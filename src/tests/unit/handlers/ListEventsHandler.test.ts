@@ -214,10 +214,10 @@ describe('ListEventsHandler single-calendar pagination', () => {
     expect(response.nextPageToken).toBe('');
   });
 
-  it('should omit maxResults/pageToken when not provided (no auto-pagination)', async () => {
+  it('should send bounded maxResults 20 when pageSize omitted (no auto-pagination)', async () => {
     await handler.runTool({ calendarId: 'primary' }, mockAccounts);
     const callArgs = mockCalendar.events.list.mock.calls[0][0];
-    expect('maxResults' in callArgs).toBe(false);
+    expect(callArgs.maxResults).toBe(20);
     expect('pageToken' in callArgs).toBe(false);
     expect(mockCalendar.events.list).toHaveBeenCalledTimes(1);
   });
@@ -228,7 +228,7 @@ describe('ListEventsHandler single-calendar pagination', () => {
       ['personal', mockOAuth2Client]
     ]);
     await expect(handler.runTool(
-      { calendarId: 'primary', account: ['work', 'personal'] },
+      { calendarId: 'primary', account: ['work', 'personal'] } as any,
       multi
     )).rejects.toThrow(/exactly one account/i);
   });
@@ -382,7 +382,8 @@ describe('ListEventsHandler - Timezone Handling', () => {
         timeMin: '2025-01-01T18:00:00Z', // 10:00 AM PST = 18:00 UTC
         timeMax: '2025-01-02T02:00:00Z', // 18:00 PM PST = 02:00 UTC next day
         singleEvents: true,
-        orderBy: 'startTime'
+        orderBy: 'startTime',
+        maxResults: 20
       });
       expect(mockCalendar.calendarList.get).not.toHaveBeenCalled();
     });
@@ -403,7 +404,8 @@ describe('ListEventsHandler - Timezone Handling', () => {
         timeMin: '2025-01-01T10:00:00-08:00',
         timeMax: '2025-01-01T18:00:00-08:00',
         singleEvents: true,
-        orderBy: 'startTime'
+        orderBy: 'startTime',
+        maxResults: 20
       });
     });
 
@@ -423,7 +425,8 @@ describe('ListEventsHandler - Timezone Handling', () => {
         timeMin: '2025-01-01T10:00:00Z',
         timeMax: '2025-01-01T18:00:00Z',
         singleEvents: true,
-        orderBy: 'startTime'
+        orderBy: 'startTime',
+        maxResults: 20
       });
       expect(mockCalendar.calendarList.get).not.toHaveBeenCalled();
       expect(mockCalendar.calendarList.list).not.toHaveBeenCalled();
@@ -445,7 +448,8 @@ describe('ListEventsHandler - Timezone Handling', () => {
         timeMin: '2025-01-01T10:00:00Z',
         timeMax: '2025-01-01T18:00:00Z',
         singleEvents: true,
-        orderBy: 'startTime'
+        orderBy: 'startTime',
+        maxResults: 20
       });
     });
   });
