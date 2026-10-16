@@ -206,7 +206,30 @@ export function createGoogleCreateProvider(
       }
       try {
         const text = await consumeBounded(res, maxBytes, controller.signal);
-        if (text.length > 0) JSON.parse(text);
+        // The 2xx body is the ONLY commit proof: it must be a NONEMPTY JSON
+        // object (non-array, non-null) carrying the EXACT requested stable
+        // id. Empty / null / array / missing-id / wrong-id bodies prove
+        // nothing about the commit (the write may have happened and the
+        // proof was lost) -> `unknown`, never `succeeded`, never a resend.
+        // Only the committed id is checked here (no full Google-event
+        // validation scope).
+        if (text.length === 0) {
+          return { status: "unknown", code: "response_unparseable" };
+        }
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(text) as unknown;
+        } catch {
+          return { status: "unknown", code: "response_unparseable" };
+        }
+        if (
+          typeof parsed !== "object" ||
+          parsed === null ||
+          Array.isArray(parsed) ||
+          (parsed as { id?: unknown }).id !== body.id
+        ) {
+          return { status: "unknown", code: "response_unparseable" };
+        }
       } catch {
         return { status: "unknown", code: "response_unparseable" };
       }

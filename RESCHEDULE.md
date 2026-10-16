@@ -55,7 +55,10 @@ tests (tests inject a loopback fixture ONLY through
   `events.insert` with body ONLY
   `{ id, summary, start: { dateTime }, end: { dateTime } }`; one attempt, no
   retry; 409 is definite `already_exists` (no overwrite); post-dispatch loss
-  is unknown. Auth runtime is the SHARED persisted write grant: the SAME
+  is unknown. A 2xx body proves the commit ONLY when it is a nonempty JSON
+  object carrying the EXACT requested stable id; empty / null / array /
+  missing-id / wrong-id 2xx bodies are `unknown` (single POST, no retry, no
+  GET auto-resolve). Auth runtime is the SHARED persisted write grant: the SAME
   `M5_RESCHEDULE_*` credential namespace + per-account grant file +
   existing OAuth client registration as reschedule (scope-identical, no
   separate `M6_CREATE_*` credential namespace) via

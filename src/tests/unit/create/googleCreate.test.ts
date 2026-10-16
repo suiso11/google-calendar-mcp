@@ -7,6 +7,9 @@
 // - 409 -> definite_failure already_exists, exactly 1 POST, no resend
 // - 5xx -> unknown, exactly 1 POST, no resend
 // - malformed-2xx body -> unknown (proof lost), exactly 1 POST
+// - unusable-2xx bodies (empty / null / array / {} / wrong-id) -> unknown,
+//   exactly 1 POST, no GET auto-resolve, no resend (only the exact-id body
+//   proves the commit)
 // - account mismatch -> definite_failure auth_refused with ZERO POSTs
 // - invalid id / empty title / end<=start -> definite_failure invalid_input, 0 POSTs
 
@@ -102,6 +105,47 @@ describe("create google provider consumer edges (M6)", () => {
     );
     expect(outcome.status).toBe("unknown");
     expect(calls).toBe(1);
+  });
+
+  it.each([
+    ["empty body", ""],
+    ["null body", "null"],
+    ["array body", "[]"],
+    ["missing-id body", "{}"],
+    ["wrong-id body", JSON.stringify({ id: "b".repeat(32) })],
+  ])("maps an unusable 2xx %s to unknown with one POST and no resolve", async (_label, raw) => {
+    const seen: string[] = [];
+    const provider = createGoogleCreateProvider({
+      getAccessToken: () => "tok",
+      fetchImpl: (async (url: unknown, init: unknown) => {
+        seen.push(String((init as { method?: string }).method ?? "GET"));
+        return new Response(raw, { status: 200 });
+      }) as typeof fetch,
+    });
+    const outcome = await provider.insert(
+      { calendarId: "primary" },
+      { id: ID, summary: "T", start: START, end: END },
+    );
+    expect(outcome.status).toBe("unknown");
+    // Single POST only: no retry/resend and no GET auto-resolve.
+    expect(seen).toEqual(["POST"]);
+  });
+
+  it("still succeeds on an exact-id 2xx event body with one POST", async () => {
+    const seen: string[] = [];
+    const provider = createGoogleCreateProvider({
+      getAccessToken: () => "tok",
+      fetchImpl: (async (url: unknown, init: unknown) => {
+        seen.push(String((init as { method?: string }).method ?? "GET"));
+        return okJson({ id: ID, summary: "T" });
+      }) as typeof fetch,
+    });
+    const outcome = await provider.insert(
+      { calendarId: "primary" },
+      { id: ID, summary: "T", start: START, end: END },
+    );
+    expect(outcome).toEqual({ status: "succeeded" });
+    expect(seen).toEqual(["POST"]);
   });
 
   it("rejects an account mismatch before any POST", async () => {

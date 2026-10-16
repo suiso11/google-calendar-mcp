@@ -1,5 +1,13 @@
 # Changelog
 
+## PR5 review fixes (unreleased, additive)
+
+- Create `events.insert`: a 2xx body counts as commit proof ONLY when it is
+  a nonempty JSON object carrying the EXACT requested stable id; empty,
+  null, array, missing-id and wrong-id 2xx bodies are `unknown` (one POST,
+  no retry, no GET auto-resolve). Exact-id event bodies still succeed;
+  header/body deadline and error-code behavior unchanged.
+
 ## PR4 review fixes (unreleased, additive)
 
 - Persisted `auth:write` grant authorizes the reschedule runtime: the
