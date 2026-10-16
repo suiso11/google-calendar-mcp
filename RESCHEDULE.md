@@ -46,6 +46,19 @@ tests (tests inject a loopback fixture ONLY through
   Without the full write credential the process exits non-zero before
   listening (defaults disabled).
 
+## M6 dedicated create entrypoint (separate surface, additive)
+
+- Separate stdio MCP entrypoint `google-calendar-create` /
+  `1.0.0-create.1` (`src/create/*`, entry `src/create/cli.ts`, bundle
+  `build/create-cli.js`). Registers ONLY `create-event` (stable 32hex id +
+  title/start/end-only strict input, `start < end`). Production POST is
+  `events.insert` with body ONLY
+  `{ id, summary, start: { dateTime }, end: { dateTime } }`; one attempt, no
+  retry; 409 is definite `already_exists` (no overwrite); post-dispatch loss
+  is unknown. Credential namespace `M6_CREATE_*` (persisted-grant loader
+  shape reused explicitly from the M5 write namespace). Readonly (3 tools)
+  and reschedule (1 tool) entrypoints unchanged.
+
 ## Checks
 
 - `npm run lint` (tsc, includes `src/reschedule/*`)

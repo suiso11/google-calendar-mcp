@@ -6,7 +6,8 @@
   "main": "build/index.js",
   "bin": {
     "google-calendar-mcp": "build/index.js",
-    "calendar-reschedule-mcp": "build/reschedule-cli.js"
+    "calendar-reschedule-mcp": "build/reschedule-cli.js",
+    "calendar-create-mcp": "build/create-cli.js"
   },
   "files": [
     "build/",

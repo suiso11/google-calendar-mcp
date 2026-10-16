@@ -246,3 +246,12 @@ Readonly Companion Calendar MCP fork prerelease. Breaking change: MCP surface is
 
 * Resolve rollup optional dependency issue in CI ([#102](https://github.com/nspady/google-calendar-mcp/issues/102)) ([0bc39bd](https://github.com/nspady/google-calendar-mcp/commit/0bc39bd54fdb57828b033153974e1a93e2b38737))
 * Support single-quoted JSON arrays in list-events calendarId ([d2af7cf](https://github.com/nspady/google-calendar-mcp/commit/d2af7cf99e3d090bceb388cbf10f7f9649100e3c))
+
+## M6 dedicated create entrypoint (unreleased, additive)
+
+- NEW separate stdio entrypoint `google-calendar-create@1.0.0-create.1`
+  (`build/create-cli.js`, tool `create-event` ONLY): normal TIMED creation
+  with body ONLY `{ id, summary, start: { dateTime }, end: { dateTime } }`
+  (stable host-derived id, no other fields). One attempt, no retry; 409 is
+  definite `already_exists` (no overwrite); post-dispatch loss is unknown.
+  Existing readonly (3 tools) and reschedule (1 tool) entrypoints unchanged.
