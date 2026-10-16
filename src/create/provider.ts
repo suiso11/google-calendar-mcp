@@ -42,6 +42,8 @@ export interface CreateProvider {
 
 /* Shared fixed endpoint + scope validation (provider + server use these). */
 
+import { validateWriteCredential } from "../reschedule/provider.js";
+
 export const GOOGLE_API_BASE = "https://www.googleapis.com" as const;
 export const CREATE_REQUIRED_SCOPE =
   "https://www.googleapis.com/auth/calendar.events" as const;
@@ -54,7 +56,20 @@ export function googleEventsInsertUrl(
   return `${base}/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events`;
 }
 
-/** Exact-whitespace scope check: ONLY the narrow events scope authorizes. */
+/**
+ * Create authorization check: the EXACT narrow write TOKEN (not the raw
+ * scope string) must be present. Reuses the SHARED `validateWriteCredential`
+ * predicate directly, so every grant the shared reschedule runtime accepts
+ * is accepted here too: the narrow `calendar.events` token alone, with
+ * surrounding/multiple whitespace, or alongside read-only extras
+ * (`calendar.events.readonly`, ...). A broad `calendar`/`auth/calendar`
+ * token ANYWHERE still refuses the whole credential (least privilege), and
+ * readonly-only / unrelated-suffix scopes stay refused. This does NOT
+ * broaden write authority: the grant loader already approves those
+ * readonly extras, and the credential still authorizes only the narrow
+ * write token.
+ */
 export function isExactCreateScope(value: unknown): boolean {
-  return value === CREATE_REQUIRED_SCOPE;
+  if (typeof value !== "string") return false;
+  return validateWriteCredential(value);
 }

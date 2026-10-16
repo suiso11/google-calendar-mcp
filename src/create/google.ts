@@ -42,6 +42,7 @@ import {
   type CreateTarget,
   googleEventsInsertUrl,
 } from "./provider.js";
+import { consumeBoundedBody } from "../reschedule/google.js";
 
 /** Bounded transport budgets (fixed, never auto-raised). */
 export const GOOGLE_CREATE_TIMEOUT_MS = 15_000;
@@ -58,16 +59,14 @@ export interface GoogleCreateProviderOptions {
   readonly maxBodyBytes?: number;
 }
 
-async function consumeBounded(
-  res: Response,
-  maxBytes: number,
-  signal: AbortSignal,
-): Promise<string> {
-  const text = await res.text();
-  if (signal.aborted) throw new Error("transport_lost");
-  if (text.length > maxBytes) throw new Error("response_too_large");
-  return text;
-}
+// Bounded 2xx body consumption reuses the SHARED reschedule helper
+// (`consumeBoundedBody`): incremental chunk reads count raw BYTE length and
+// enforce the 256 KiB cap BEFORE copy/decode, cancelling the reader on
+// overflow or deadline abort — never a full `res.text()` buffer, never a
+// UTF-16 code-unit count. Malformed UTF-8 decodes lossy (same non-fatal
+// pattern as reschedule) and lands `unknown` via the JSON gate below,
+// never an exception leak. Null-body responses stay on the empty path and
+// remain `unknown` (exact-id proof missing), same as before.
 
 export function createGoogleCreateProvider(
   options: GoogleCreateProviderOptions,
@@ -205,7 +204,7 @@ export function createGoogleCreateProvider(
         return { status: "unknown", code: "upstream_unknown" };
       }
       try {
-        const text = await consumeBounded(res, maxBytes, controller.signal);
+        const text = await consumeBoundedBody(res, maxBytes, controller.signal);
         // The 2xx body is the ONLY commit proof: it must be a NONEMPTY JSON
         // object (non-array, non-null) carrying the EXACT requested stable
         // id. Empty / null / array / missing-id / wrong-id bodies prove

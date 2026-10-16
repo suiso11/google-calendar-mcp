@@ -267,3 +267,14 @@ Readonly Companion Calendar MCP fork prerelease. Breaking change: MCP surface is
   `resolveWriteRuntimeCredential` + `createAccessTokenSupplier` +
   `updateWriteStoredAccessToken`; no `M6_CREATE_*` credential namespace).
   Existing readonly (3 tools) and reschedule (1 tool) entrypoints unchanged.
+- Review fixes (PR5): the 2xx body gate requires a NONEMPTY object with the
+  EXACT requested stable id (empty/null/array/wrong-id stay `unknown`);
+  the 256 KiB response bound is enforced on raw BYTE length while
+  streaming (shared `consumeBoundedBody` helper, reader cancelled on
+  overflow/deadline — never a full `res.text()` buffer, never a UTF-16
+  count); scope authorization reuses the SHARED `validateWriteCredential`
+  predicate (narrow token with whitespace/read-only extras accepted,
+  broad-`calendar`-anywhere still refused); the executable entry is the
+  boring wrapper `src/create-cli.ts` (unconditional `main()`, import-safe
+  `src/create/cli.ts` with no autoexec) so the `calendar-create-mcp` bin
+  symlink starts the server.

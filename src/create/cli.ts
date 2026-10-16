@@ -157,7 +157,7 @@ export async function resolveCreateRuntimeCredential(
   return resolveWriteRuntimeCredential(env, deps);
 }
 
-async function main(): Promise<void> {
+export async function main(): Promise<void> {
   let resolved: WriteRuntimeResolution;
   try {
     resolved = await resolveWriteRuntimeCredential(process.env, {
@@ -184,11 +184,13 @@ async function main(): Promise<void> {
   });
 }
 
-// Entry guard: importing this module (tests resolving the credential
-// loader / provider factory) must not start the stdio server or exit the
-// process. Production runs via `build/create-cli.js` (argv contains
-// `create-cli`). The reschedule guard (`reschedule-cli`) stays false here,
-// so importing the shared loader never starts the reschedule server.
-if (process.argv[1]?.includes("create-cli") === true) {
-  await main();
-}
+// Import-safe module: importing this file (tests resolving the credential
+// loader / provider factory, or the `create-event` server factory) NEVER
+// starts the stdio server and NEVER exits the process. The production
+// executable is the thin wrapper `src/create-cli.ts` (bundled to
+// `build/create-cli.js`, bin `calendar-create-mcp`), which calls the
+// exported `main()` above unconditionally — no `process.argv[1]` guard, so
+// invocation through the npm bin symlink (whose path contains
+// `calendar-create-mcp`, never `create-cli`) still starts the server. The
+// reschedule guard (`reschedule-cli`) is untouched: importing the shared
+// loader here never starts the reschedule server either.

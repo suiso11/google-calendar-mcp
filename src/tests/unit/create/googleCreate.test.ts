@@ -189,3 +189,90 @@ describe("create google provider consumer edges (M6)", () => {
     expect(calls).toBe(0);
   });
 });
+
+describe("create google provider bounded body (M6, shared helper)", () => {
+  it("rejects a multi-byte 2xx body past the BYTE cap even when the char length fits, one POST", async () => {
+    // "é" is 1 UTF-16 code unit but 2 UTF-8 bytes: a body whose char
+    // length fits the cap but whose byte length exceeds it must stay
+    // `unknown` (byte bound enforced BEFORE decode, never text.length).
+    const pad = "é".repeat(60);
+    const raw = JSON.stringify({ id: ID, pad });
+    const charLen = raw.length;
+    const byteLen = new TextEncoder().encode(raw).byteLength;
+    const cap = 128;
+    expect(charLen).toBeLessThanOrEqual(cap);
+    expect(byteLen).toBeGreaterThan(cap);
+    let calls = 0;
+    const provider = createGoogleCreateProvider({
+      getAccessToken: () => "tok",
+      maxBodyBytes: cap,
+      fetchImpl: (async () => {
+        calls += 1;
+        return new Response(raw, { status: 200 });
+      }) as typeof fetch,
+    });
+    const outcome = await provider.insert(
+      { calendarId: "primary" },
+      { id: ID, summary: "T", start: START, end: END },
+    );
+    expect(outcome.status).toBe("unknown");
+    expect(calls).toBe(1);
+  });
+
+  it("cancels a chunked oversize 2xx stream early (no full read), one POST", async () => {
+    // Lazy pull-based stream offering 64 x 8 KiB (512 KiB) against the
+    // default 256 KiB cap: the provider must cancel after ~33 chunks and
+    // never pull the whole stream (byte bound BEFORE buffering).
+    const totalChunks = 64;
+    const chunk = new TextEncoder().encode("x".repeat(8192));
+    let pulls = 0;
+    let cancelled = false;
+    const lazy = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pulls += 1;
+        controller.enqueue(chunk);
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    let calls = 0;
+    const provider = createGoogleCreateProvider({
+      getAccessToken: () => "tok",
+      fetchImpl: (async () => {
+        calls += 1;
+        return new Response(lazy, { status: 200 });
+      }) as typeof fetch,
+    });
+    const outcome = await provider.insert(
+      { calendarId: "primary" },
+      { id: ID, summary: "T", start: START, end: END },
+    );
+    expect(outcome.status).toBe("unknown");
+    expect(calls).toBe(1);
+    expect(cancelled).toBe(true);
+    expect(pulls).toBeLessThan(totalChunks);
+  });
+
+  it("maps a hanging 2xx body to unknown on the shared deadline (no retry, no hang)", async () => {
+    let calls = 0;
+    const provider = createGoogleCreateProvider({
+      getAccessToken: () => "tok",
+      timeoutMs: 30,
+      fetchImpl: (async () => {
+        calls += 1;
+        // Headers delivered, body never yields: the live deadline aborts it.
+        const hanging = new ReadableStream<Uint8Array>({});
+        return new Response(hanging, { status: 200 });
+      }) as typeof fetch,
+    });
+    const started = Date.now();
+    const outcome = await provider.insert(
+      { calendarId: "primary" },
+      { id: ID, summary: "T", start: START, end: END },
+    );
+    expect(outcome.status).toBe("unknown");
+    expect(calls).toBe(1);
+    expect(Date.now() - started).toBeLessThan(5000);
+  });
+});

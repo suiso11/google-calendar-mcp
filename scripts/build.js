@@ -78,11 +78,13 @@ const writeAuthBuildOptions = {
 };
 
 // M6 dedicated create entrypoint (ADDITIVE, separate bundle).
-// Sources confined to `src/create/` into `build/create-cli.js` (bin
-// `calendar-create-mcp`). Readonly + reschedule bundles untouched.
+// Thin wrapper `src/create-cli.ts` (which unconditionally runs the exported
+// `main()` from `src/create/cli.js`, import-safe with no autoexec) into
+// `build/create-cli.js` (bin `calendar-create-mcp`). Readonly + reschedule
+// bundles untouched.
 /** @type {import('esbuild').BuildOptions} */
 const createBuildOptions = {
-  entryPoints: [join(__dirname, '../src/create/cli.ts')],
+  entryPoints: [join(__dirname, '../src/create-cli.ts')],
   bundle: true,
   platform: 'node',
   target: 'node18',

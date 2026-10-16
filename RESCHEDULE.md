@@ -49,8 +49,11 @@ tests (tests inject a loopback fixture ONLY through
 ## M6 dedicated create entrypoint (separate surface, additive)
 
 - Separate stdio MCP entrypoint `google-calendar-create` /
-  `1.0.0-create.1` (`src/create/*`, entry `src/create/cli.ts`, bundle
-  `build/create-cli.js`). Registers ONLY `create-event` (stable 32hex id +
+  `1.0.0-create.1` (`src/create/*`, executable wrapper `src/create-cli.ts`
+  calling the exported import-safe `main()` from `src/create/cli.ts` with
+  no autoexec, bundle `build/create-cli.js`, bin `calendar-create-mcp` —
+  the unconditional entry keeps the npm bin symlink working).
+  Registers ONLY `create-event` (stable 32hex id +
   title/start/end-only strict input, `start < end`). Production POST is
   `events.insert` with body ONLY
   `{ id, summary, start: { dateTime }, end: { dateTime } }`; one attempt, no
@@ -58,12 +61,18 @@ tests (tests inject a loopback fixture ONLY through
   is unknown. A 2xx body proves the commit ONLY when it is a nonempty JSON
   object carrying the EXACT requested stable id; empty / null / array /
   missing-id / wrong-id 2xx bodies are `unknown` (single POST, no retry, no
-  GET auto-resolve). Auth runtime is the SHARED persisted write grant: the SAME
+  GET auto-resolve). The 2xx body is consumed through the SHARED
+  `consumeBoundedBody` stream helper (same 256 KiB BYTE bound as
+  reschedule, enforced before copy/decode, reader cancelled on
+  overflow/deadline). Auth runtime is the SHARED persisted write grant: the SAME
   `M5_RESCHEDULE_*` credential namespace + per-account grant file +
   existing OAuth client registration as reschedule (scope-identical, no
   separate `M6_CREATE_*` credential namespace) via
   `resolveWriteRuntimeCredential` + `createAccessTokenSupplier` +
-  `updateWriteStoredAccessToken`. Readonly (3 tools)
+  `updateWriteStoredAccessToken`, and scope authorization reuses the SHARED
+  `validateWriteCredential` predicate (narrow token with
+  whitespace/read-only extras accepted, broad-`calendar`-anywhere refused).
+  Readonly (3 tools)
   and reschedule (1 tool) entrypoints unchanged.
 
 ## Checks
