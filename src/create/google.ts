@@ -4,9 +4,11 @@
 // loopback fixture injected through `endpointBase`; the production CLI
 // never sets `endpointBase`, so production always hits the FIXED Google
 // URL from `./provider.js`):
-//   - Auth: explicit bearer `accessToken` (SEPARATE `M6_CREATE_*`
-//     namespace; never a readonly/reschedule token). No interactive OAuth
-//     flow, no consent request, no scope broadening at runtime.
+//   - Auth: explicit bearer `accessToken` (SHARED persisted write grant:
+//     the SAME `M5_RESCHEDULE_*` namespace as reschedule — the narrow
+//     `calendar.events` grant authorizes both; never a readonly token). No
+//     interactive OAuth flow, no consent request, no scope broadening at
+//     runtime.
 //   - Single attempt per logical insert: exactly ONE fetch (no library
 //     retries, no auth auto-replay, no resend on 409/timeout/loss). A
 //     refresh may happen BEFORE dispatch (auth layer), never after.

@@ -55,8 +55,12 @@ tests (tests inject a loopback fixture ONLY through
   `events.insert` with body ONLY
   `{ id, summary, start: { dateTime }, end: { dateTime } }`; one attempt, no
   retry; 409 is definite `already_exists` (no overwrite); post-dispatch loss
-  is unknown. Credential namespace `M6_CREATE_*` (persisted-grant loader
-  shape reused explicitly from the M5 write namespace). Readonly (3 tools)
+  is unknown. Auth runtime is the SHARED persisted write grant: the SAME
+  `M5_RESCHEDULE_*` credential namespace + per-account grant file +
+  existing OAuth client registration as reschedule (scope-identical, no
+  separate `M6_CREATE_*` credential namespace) via
+  `resolveWriteRuntimeCredential` + `createAccessTokenSupplier` +
+  `updateWriteStoredAccessToken`. Readonly (3 tools)
   and reschedule (1 tool) entrypoints unchanged.
 
 ## Checks

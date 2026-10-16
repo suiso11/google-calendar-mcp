@@ -254,4 +254,8 @@ Readonly Companion Calendar MCP fork prerelease. Breaking change: MCP surface is
   with body ONLY `{ id, summary, start: { dateTime }, end: { dateTime } }`
   (stable host-derived id, no other fields). One attempt, no retry; 409 is
   definite `already_exists` (no overwrite); post-dispatch loss is unknown.
+  Auth runtime is the SHARED persisted write grant (SAME `M5_RESCHEDULE_*`
+  namespace + grant file + OAuth client as reschedule via
+  `resolveWriteRuntimeCredential` + `createAccessTokenSupplier` +
+  `updateWriteStoredAccessToken`; no `M6_CREATE_*` credential namespace).
   Existing readonly (3 tools) and reschedule (1 tool) entrypoints unchanged.

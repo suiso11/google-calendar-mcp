@@ -3,8 +3,9 @@
 // Injectable provider seam: the MCP server owns tool parsing; the host
 // injects the HTTP/Google implementation. The production implementation is
 // `createGoogleCreateProvider` in `./google.js` (real POST events.insert
-// against the fixed Google endpoint, real bearer auth from the SEPARATE
-// `M6_CREATE_*` namespace, no OAuth flow at runtime). Fixture/test
+// against the fixed Google endpoint, real bearer auth from the SHARED
+// persisted write grant — the SAME `M5_RESCHEDULE_*` namespace as
+// reschedule, no OAuth flow at runtime). Fixture/test
 // providers live in TESTS ONLY and must never be imported here.
 
 export type CreateTarget = {
