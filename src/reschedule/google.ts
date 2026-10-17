@@ -203,9 +203,12 @@ function signalRejection(signal: AbortSignal): {
  * deadline/abort that covers the headers keeps covering every streamed
  * chunk, so a headers-delivered never-ending body cannot hang forever.
  * Oversize and deadline/caller aborts cancel the stream (no unbounded
- * buffering, no leaked reader).
+ * buffering, no leaked reader). Shared by the reschedule adapter above and
+ * the create adapter (`../create/google.js`): both entrypoints enforce the
+ * SAME 256 KiB byte bound BEFORE copy/decode, so neither can grow an
+ * unbounded allocation from a hostile body.
  */
-async function consumeBoundedBody(
+export async function consumeBoundedBody(
   res: Response,
   maxBytes: number,
   signal: AbortSignal,

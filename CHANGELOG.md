@@ -1,5 +1,13 @@
 # Changelog
 
+## PR5 review fixes (unreleased, additive)
+
+- Create `events.insert`: a 2xx body counts as commit proof ONLY when it is
+  a nonempty JSON object carrying the EXACT requested stable id; empty,
+  null, array, missing-id and wrong-id 2xx bodies are `unknown` (one POST,
+  no retry, no GET auto-resolve). Exact-id event bodies still succeed;
+  header/body deadline and error-code behavior unchanged.
+
 ## PR4 review fixes (unreleased, additive)
 
 - Persisted `auth:write` grant authorizes the reschedule runtime: the
@@ -246,3 +254,27 @@ Readonly Companion Calendar MCP fork prerelease. Breaking change: MCP surface is
 
 * Resolve rollup optional dependency issue in CI ([#102](https://github.com/nspady/google-calendar-mcp/issues/102)) ([0bc39bd](https://github.com/nspady/google-calendar-mcp/commit/0bc39bd54fdb57828b033153974e1a93e2b38737))
 * Support single-quoted JSON arrays in list-events calendarId ([d2af7cf](https://github.com/nspady/google-calendar-mcp/commit/d2af7cf99e3d090bceb388cbf10f7f9649100e3c))
+
+## M6 dedicated create entrypoint (unreleased, additive)
+
+- NEW separate stdio entrypoint `google-calendar-create@1.0.0-create.1`
+  (`build/create-cli.js`, tool `create-event` ONLY): normal TIMED creation
+  with body ONLY `{ id, summary, start: { dateTime }, end: { dateTime } }`
+  (stable host-derived id, no other fields). One attempt, no retry; 409 is
+  definite `already_exists` (no overwrite); post-dispatch loss is unknown.
+  Auth runtime is the SHARED persisted write grant (SAME `M5_RESCHEDULE_*`
+  namespace + grant file + OAuth client as reschedule via
+  `resolveWriteRuntimeCredential` + `createAccessTokenSupplier` +
+  `updateWriteStoredAccessToken`; no `M6_CREATE_*` credential namespace).
+  Existing readonly (3 tools) and reschedule (1 tool) entrypoints unchanged.
+- Review fixes (PR5): the 2xx body gate requires a NONEMPTY object with the
+  EXACT requested stable id (empty/null/array/wrong-id stay `unknown`);
+  the 256 KiB response bound is enforced on raw BYTE length while
+  streaming (shared `consumeBoundedBody` helper, reader cancelled on
+  overflow/deadline — never a full `res.text()` buffer, never a UTF-16
+  count); scope authorization reuses the SHARED `validateWriteCredential`
+  predicate (narrow token with whitespace/read-only extras accepted,
+  broad-`calendar`-anywhere still refused); the executable entry is the
+  boring wrapper `src/create-cli.ts` (unconditional `main()`, import-safe
+  `src/create/cli.ts` with no autoexec) so the `calendar-create-mcp` bin
+  symlink starts the server.

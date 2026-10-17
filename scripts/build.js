@@ -77,6 +77,26 @@ const writeAuthBuildOptions = {
   sourcemap: true,
 };
 
+// M6 dedicated create entrypoint (ADDITIVE, separate bundle).
+// Thin wrapper `src/create-cli.ts` (which unconditionally runs the exported
+// `main()` from `src/create/cli.js`, import-safe with no autoexec) into
+// `build/create-cli.js` (bin `calendar-create-mcp`). Readonly + reschedule
+// bundles untouched.
+/** @type {import('esbuild').BuildOptions} */
+const createBuildOptions = {
+  entryPoints: [join(__dirname, '../src/create-cli.ts')],
+  bundle: true,
+  platform: 'node',
+  target: 'node18',
+  outfile: join(__dirname, '../build/create-cli.js'),
+  format: 'esm',
+  banner: {
+    js: '#!/usr/bin/env node\n',
+  },
+  packages: 'external', // Don't bundle node_modules
+  sourcemap: true,
+};
+
 const rescheduleOnly = process.argv.includes('--reschedule-only');
 
 if (isWatch) {
@@ -97,6 +117,7 @@ if (isWatch) {
     esbuild.build(buildOptions),
     esbuild.build(authServerBuildOptions),
     esbuild.build(rescheduleBuildOptions),
+    esbuild.build(createBuildOptions),
     esbuild.build(writeAuthBuildOptions)
   ]);
 
@@ -105,6 +126,7 @@ if (isWatch) {
     const { chmod } = await import('fs/promises');
     await chmod(buildOptions.outfile, 0o755);
     await chmod(rescheduleBuildOptions.outfile, 0o755);
+    await chmod(createBuildOptions.outfile, 0o755);
     await chmod(writeAuthBuildOptions.outfile, 0o755);
   }
 
