@@ -1,5 +1,53 @@
 # Changelog
 
+## PR4 review fixes (unreleased, additive)
+
+- Persisted `auth:write` grant authorizes the reschedule runtime: the
+  per-account grant in the SEPARATE token file loads with the existing OAuth
+  client registration into the CLI, refreshed access tokens persist back
+  into the SAME file (atomic merge, other accounts kept, 0600), and
+  missing/ambiguous/readonly/broad grants plus any partial env credential
+  refuse closed (no readonly-token reuse, no TEST endpoint override).
+- Omitted `pageSize` sends bounded `maxResults: 20` (one page, no eager
+  pagination); explicit 1..20 honored.
+- `list-events`/`search-events` advertise and enforce exactly one optional
+  account string (arrays rejected at schema AND runtime before provider I/O).
+- Sparse cancelled GETs classify `cancelled_unsupported` before bounds
+  checks (0 PATCH); strict bounds still required for non-cancelled events.
+
+## M5 all-day conversion (unreleased, additive)
+
+Valid all-day sources CONVERT to timed (strict YYYY-MM-DD bounds retained,
+exclusive end > start; malformed/mixed bounds are `invalid_input` with NO
+patch). The conditional PATCH sends start/end ONLY with exact `If-Match`;
+all-day conversions clear the stale field (`date: null` + new `dateTime`,
+timed sources keep `dateTime`-only). Etag/recurrence/cancelled/412/unknown
+guards are unchanged. No live Google writes in tests (injected fetch only).
+
+## M5 write-consent (unreleased, additive)
+
+Separate out-of-band write-consent command (`npm run auth:write` ->
+`build/write-auth-server.js`; sources `src/write-auth-server.ts`,
+`src/reschedule/writeAuthServer.ts`, `src/reschedule/writeAuthCli.ts`,
+`src/reschedule/writeTokenStore.ts`): REAL loopback consent
+(`127.0.0.1`, exact redirect, state + PKCE-S256, single-use callback,
+bounded 12-minute default window) for the exact
+`https://www.googleapis.com/auth/calendar.events` scope into the SEPARATE
+`~/.config/google-calendar-mcp-write/tokens.json` (0600, override
+`M5_RESCHEDULE_WRITE_TOKEN_PATH`). Broad/readonly grants are refused and
+persist nothing; the readonly entrypoint, tools, scopes, token file, and
+the pinned `google-calendar-reschedule` / `1.0.0-reschedule.1` wire
+identity are unchanged. No calendar reads/writes; a named TEST event plus
+explicit approval is still required before any reschedule.
+
+## 3.0.0-readonly.2
+
+Intentional breaking narrow cutover: MCP surface is exactly three event tools (`list-events`, `search-events`, `get-event`); `list-calendars` is removed with no alias or shim. Exact configured `calendarId` values are opaque and forwarded byte-for-byte (no name resolution); the MCP path performs no `calendarList`/`calendars` metadata I/O. Timezone-naive bounds use the explicit `timeZone` when given, else deterministic UTC (no calendar-timezone lookup). Account selection is exactly one account per request (explicit normalized ID, or the sole configured key); multi-account ambiguity and invalid accounts reject before any provider I/O. Fractional explicit-offset bounds keep byte-for-byte preservation. Out-of-band account provisioning remains consent plumbing only, not an MCP read capability. Release identity stays private (`private: true`, version `3.0.0-readonly.2`) and never published to npm.
+
+## 3.0.0-readonly.1
+
+Readonly Companion Calendar MCP fork prerelease. Breaking change: MCP surface is read-only (`list-calendars`, `list-events`, `search-events`, `get-event`); no write operations. Release identity is private (`private: true`, version `3.0.0-readonly.1`) and never published to npm; upstream `publish.yml` release workflow removed.
+
 ## [2.6.3](https://github.com/nspady/google-calendar-mcp/compare/v2.6.2...v2.6.3) (2026-09-02)
 
 

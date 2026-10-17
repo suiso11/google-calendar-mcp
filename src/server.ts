@@ -14,11 +14,6 @@ import { TokenManager } from './auth/tokenManager.js';
 // Import tool registry
 import { ToolRegistry } from './tools/registry.js';
 
-// Import account management handler
-import { ManageAccountsHandler, ServerContext } from './handlers/core/ManageAccountsHandler.js';
-import { z } from 'zod';
-import { CalendarRegistry } from './services/CalendarRegistry.js';
-
 // Import transport handlers
 import { StdioTransportHandler } from './transports/stdio.js';
 import { HttpTransportHandler, HttpTransportConfig } from './transports/http.js';
@@ -81,11 +76,10 @@ export class GoogleCalendarMcpServer {
       const hasValidTokens = await this.tokenManager.validateTokens(accountMode);
       if (!hasValidTokens) {
         // No existing tokens - server will start but calendar tools won't work
-        // User can authenticate via the 'manage-accounts' tool
         process.stderr.write(`⚠️  No authenticated accounts found.\n`);
-        process.stderr.write(`Use the 'manage-accounts' tool with action 'add' to authenticate a Google account, or run:\n`);
+        process.stderr.write(`Run out-of-band authentication:\n`);
         process.stderr.write(`  npx @cocal/google-calendar-mcp auth\n\n`);
-        // Don't exit - allow server to start so add-account tool is available
+        // Don't exit - allow server to start; authenticate out-of-band then restart
       } else {
         process.stderr.write(`Valid ${accountMode} user tokens found.\n`);
         this.accounts = await this.tokenManager.loadAllAccounts();
@@ -109,235 +103,11 @@ export class GoogleCalendarMcpServer {
       version: SERVER_VERSION
     });
     this.registerTools(server);
-    this.registerPrompts(server);
-    this.registerResources(server);
     return server;
   }
 
   private registerTools(server: McpServer): void {
     ToolRegistry.registerAll(server, this.executeWithHandler.bind(this), this.config);
-
-    // Register account management tools separately (they need special context)
-    this.registerAccountManagementTools(server);
-  }
-
-  /**
-   * Register the manage-accounts tool that needs access to server internals.
-   * This tool is special because it:
-   * - Doesn't require existing authentication (for 'add' action)
-   * - Needs access to authServer, tokenManager, etc.
-   */
-  private registerAccountManagementTools(server: McpServer): void {
-    // Use arrow functions to keep `this` reference current after reloadAccounts()
-    const self = this;
-    const serverContext: ServerContext = {
-      oauth2Client: this.oauth2Client,
-      tokenManager: this.tokenManager,
-      authServer: this.authServer,
-      get accounts() { return self.accounts; },
-      reloadAccounts: async () => {
-        this.accounts = await this.tokenManager.loadAllAccounts();
-        return this.accounts;
-      }
-    };
-
-    const manageAccountsHandler = new ManageAccountsHandler();
-    server.registerTool(
-      'manage-accounts',
-      {
-        title: 'Manage Google Accounts',
-        description: "Manage Google account authentication. Actions: 'list' (show accounts), 'add' (authenticate new account), 'remove' (remove account).",
-        inputSchema: {
-          action: z.enum(['list', 'add', 'remove'])
-            .describe("Action to perform: 'list' shows all accounts, 'add' authenticates a new account, 'remove' removes an account"),
-          account_id: z.string()
-            .regex(/^[a-z0-9_-]{1,64}$/, "Account nickname must be 1-64 characters: lowercase letters, numbers, dashes, underscores only")
-            .optional()
-            .describe("Account nickname (e.g., 'work', 'personal') - a friendly name to identify this Google account. Required for 'add' and 'remove'. Optional for 'list' (shows all if omitted)")
-        },
-        annotations: {
-          readOnlyHint: false,
-          destructiveHint: true,
-          idempotentHint: false,
-          openWorldHint: false
-        }
-      },
-      async (args) => {
-        return manageAccountsHandler.runTool(args, serverContext);
-      }
-    );
-  }
-
-  private registerPrompts(server: McpServer): void {
-    server.registerPrompt(
-      'daily-agenda-brief',
-      {
-        title: 'Daily Agenda Brief',
-        description: 'Generate a concise daily agenda brief with priorities, risks, and focus blocks.',
-        argsSchema: {
-          date: z.string().optional().describe("Date in YYYY-MM-DD format. Defaults to today's date in the selected timezone."),
-          account: z.union([z.string(), z.array(z.string())]).optional().describe("Account nickname or list of account nicknames to include."),
-          timeZone: z.string().optional().describe("IANA timezone (for example: America/Los_Angeles).")
-        }
-      },
-      async ({ date, account, timeZone }) => {
-        const accountHint = Array.isArray(account) ? account.join(', ') : account;
-        const dateHint = date ?? 'today';
-        const timeZoneHint = timeZone ?? 'calendar default timezone';
-        const toolArgs: Record<string, unknown> = {
-          calendarId: 'primary'
-        };
-        if (account) {
-          toolArgs.account = account;
-        }
-        if (timeZone) {
-          toolArgs.timeZone = timeZone;
-        }
-
-        return {
-          messages: [
-            {
-              role: 'user',
-              content: {
-                type: 'text',
-                text:
-                  `Create my daily agenda brief for ${dateHint} in ${timeZoneHint}. ` +
-                  `Account scope: ${accountHint ?? 'all connected accounts'}.\n\n` +
-                  `Use these tools in order:\n` +
-                  `1) get-current-time to ground date/time context.\n` +
-                  `2) list-events with args ${JSON.stringify(toolArgs)} and a time window for the requested day.\n` +
-                  `3) get-freebusy if you need to confirm open focus blocks.\n\n` +
-                  `Return sections:\n` +
-                  `- Priorities (top 3)\n` +
-                  `- Meeting Risks (overlaps, back-to-back runs, insufficient prep gaps)\n` +
-                  `- Suggested Focus Blocks (specific time ranges)\n` +
-                  `- Prep Checklist (owner + due-before-event)\n\n` +
-                  `Keep it concise, actionable, and timezone-explicit.`
-              }
-            }
-          ]
-        };
-      }
-    );
-
-    server.registerPrompt(
-      'find-and-book-meeting',
-      {
-        title: 'Find and Book Meeting',
-        description: 'Find candidate meeting times and create an event only after explicit confirmation.',
-        argsSchema: {
-          title: z.string().describe('Meeting title.'),
-          attendeeEmails: z.array(z.string()).optional().describe('List of attendee emails.'),
-          durationMinutes: z.number().int().min(15).max(240).describe('Meeting duration in minutes.'),
-          windowStart: z.string().describe('Window start in ISO 8601 format.'),
-          windowEnd: z.string().describe('Window end in ISO 8601 format.'),
-          account: z.union([z.string(), z.array(z.string())]).optional().describe('Account nickname or list of account nicknames to include.'),
-          targetCalendarId: z.string().optional().describe("Calendar ID to book on. Defaults to 'primary'."),
-          timeZone: z.string().optional().describe('IANA timezone used for candidate slots and final booking.')
-        }
-      },
-      async ({ title, attendeeEmails, durationMinutes, windowStart, windowEnd, account, targetCalendarId, timeZone }) => {
-        const freebusyArgs: Record<string, unknown> = {
-          timeMin: windowStart,
-          timeMax: windowEnd,
-          calendars: [{ id: targetCalendarId ?? 'primary' }]
-        };
-        if (account) {
-          freebusyArgs.account = account;
-        }
-        if (timeZone) {
-          freebusyArgs.timeZone = timeZone;
-        }
-
-        return {
-          messages: [
-            {
-              role: 'user',
-              content: {
-                type: 'text',
-                text:
-                  `Find and book a meeting.\n\n` +
-                  `Constraints:\n` +
-                  `- Title: ${title}\n` +
-                  `- Duration: ${durationMinutes} minutes\n` +
-                  `- Window: ${windowStart} to ${windowEnd}\n` +
-                  `- Account scope: ${Array.isArray(account) ? account.join(', ') : account ?? 'all connected accounts'}\n` +
-                  `- Target calendar: ${targetCalendarId ?? 'primary'}\n` +
-                  `- Timezone: ${timeZone ?? 'calendar default timezone'}\n` +
-                  `- Attendees: ${(attendeeEmails && attendeeEmails.length > 0) ? attendeeEmails.join(', ') : 'none specified'}\n\n` +
-                  `Workflow:\n` +
-                  `1) Call get-current-time first.\n` +
-                  `2) Call get-freebusy with args ${JSON.stringify(freebusyArgs)}.\n` +
-                  `3) Propose exactly 3 ranked candidate slots with tradeoffs.\n` +
-                  `4) Ask for explicit confirmation of one slot.\n` +
-                  `5) Only after confirmation, call create-event with selected slot and provided attendees.\n\n` +
-                  `Do not create an event before confirmation.`
-              }
-            }
-          ]
-        };
-      }
-    );
-  }
-
-  private registerResources(server: McpServer): void {
-    server.registerResource(
-      'calendar-accounts',
-      'calendar://accounts',
-      {
-        title: 'Connected Accounts and Calendars',
-        description: 'Lists authenticated account nicknames and a deduplicated summary of accessible calendars.',
-        mimeType: 'application/json'
-      },
-      async () => {
-        try {
-          await this.ensureAuthenticated();
-
-          const accountIds = Array.from(this.accounts.keys()).sort();
-          const registry = CalendarRegistry.getInstance();
-          const unifiedCalendars = await registry.getUnifiedCalendars(this.accounts);
-
-          const payload = {
-            generatedAt: new Date().toISOString(),
-            accountCount: accountIds.length,
-            accountIds,
-            calendarCount: unifiedCalendars.length,
-            calendars: unifiedCalendars.map((calendar) => ({
-              calendarId: calendar.calendarId,
-              displayName: calendar.displayName,
-              preferredAccount: calendar.preferredAccount,
-              access: calendar.accounts.map((accountAccess) => ({
-                accountId: accountAccess.accountId,
-                accessRole: accountAccess.accessRole,
-                primary: accountAccess.primary
-              }))
-            })),
-            notes: [
-              "Calendars are deduplicated across accounts by calendar ID.",
-              "preferredAccount is the account with the highest permissions for that calendar."
-            ]
-          };
-
-          return {
-            contents: [
-              {
-                uri: 'calendar://accounts',
-                mimeType: 'application/json',
-                text: JSON.stringify(payload, null, 2)
-              }
-            ]
-          };
-        } catch (error) {
-          if (error instanceof McpError) {
-            throw error;
-          }
-          throw new McpError(
-            ErrorCode.InternalError,
-            `Failed to load calendar accounts: ${error instanceof Error ? error.message : String(error)}`
-          );
-        }
-      }
-    );
   }
 
   private async ensureAuthenticated(): Promise<void> {

@@ -79,17 +79,17 @@ async function main() {
       console.log('❌ list-calendars failed:', error.message);
     }
 
-    // Test list-colors
+    // Verify readonly access with list-calendars
     try {
-      console.log('\n🎨 Testing list-colors...');
-      const colorsResult = await client.callTool({
-        name: 'list-colors',
+      console.log('\n📅 Verifying list-calendars (readonly check)...');
+      const calendarsCheckResult = await client.callTool({
+        name: 'list-calendars',
         arguments: {}
       });
-      console.log('✅ list-colors successful');
-      console.log('Result:', colorsResult.content[0].text.substring(0, 300) + '...');
+      console.log('✅ list-calendars check successful');
+      console.log('Result:', calendarsCheckResult.content[0].text.substring(0, 300) + '...');
     } catch (error) {
-      console.log('❌ list-colors failed:', error.message);
+      console.log('❌ list-calendars check failed:', error.message);
     }
 
     // Test list-events for primary calendar

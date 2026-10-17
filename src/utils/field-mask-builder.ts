@@ -5,6 +5,7 @@
 // Allowed fields that can be requested from Google Calendar API
 export const ALLOWED_EVENT_FIELDS = [
   'id',
+  'etag',
   'summary',
   'description',
   'start',
@@ -45,6 +46,7 @@ export type AllowedEventField = typeof ALLOWED_EVENT_FIELDS[number];
 // Default fields always included
 export const DEFAULT_EVENT_FIELDS: AllowedEventField[] = [
   'id',
+  'etag',
   'summary',
   'start',
   'end',

@@ -99,6 +99,8 @@ describe('AuthServer', () => {
       expect(result.authUrl).toContain('accounts.google.com');
       expect(result.callbackUrl).toContain('oauth2callback');
       expect(result.callbackUrl).toContain('3500');
+      const scopes = new URL(result.authUrl!).searchParams.get('scope')?.split(' ') ?? [];
+      expect(scopes).toEqual(['https://www.googleapis.com/auth/calendar.events.readonly']);
     });
 
     it('should stop existing server before starting new one', async () => {

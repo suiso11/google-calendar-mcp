@@ -34,21 +34,78 @@ const authServerBuildOptions = {
   sourcemap: true,
 };
 
+// M5 dedicated reschedule entrypoint (ADDITIVE, separate bundle).
+// The readonly bundles above (`build/index.js`, `build/auth-server.js`) are
+// untouched: this builds ONLY `src/reschedule-cli.ts` (sources confined to
+// `src/reschedule/`) into `build/reschedule-cli.js` (bin
+// `calendar-reschedule-mcp`). `npm run build` keeps building every bundle,
+// exactly as before plus this one; `npm run build:reschedule` builds only
+// the separate entrypoint.
+/** @type {import('esbuild').BuildOptions} */
+const rescheduleBuildOptions = {
+  entryPoints: [join(__dirname, '../src/reschedule-cli.ts')],
+  bundle: true,
+  platform: 'node',
+  target: 'node18',
+  outfile: join(__dirname, '../build/reschedule-cli.js'),
+  format: 'esm',
+  banner: {
+    js: '#!/usr/bin/env node\n',
+  },
+  packages: 'external', // Don't bundle node_modules
+  sourcemap: true,
+};
+
+// M5 SEPARATE write-consent entrypoint (ADDITIVE, separate bundle).
+// Out-of-band user consent only (`src/write-auth-server.ts` -> 
+// `build/write-auth-server.js`, script `npm run auth:write`): REAL loopback
+// consent for the exact write scope into the SEPARATE write token file.
+// Registers no MCP tools, performs no calendar reads/writes, never touches
+// the readonly bundles above.
+/** @type {import('esbuild').BuildOptions} */
+const writeAuthBuildOptions = {
+  entryPoints: [join(__dirname, '../src/write-auth-server.ts')],
+  bundle: true,
+  platform: 'node',
+  target: 'node18',
+  outfile: join(__dirname, '../build/write-auth-server.js'),
+  format: 'esm',
+  banner: {
+    js: '#!/usr/bin/env node\n',
+  },
+  packages: 'external', // Don't bundle node_modules
+  sourcemap: true,
+};
+
+const rescheduleOnly = process.argv.includes('--reschedule-only');
+
 if (isWatch) {
   const context = await esbuild.context(buildOptions);
   const authContext = await esbuild.context(authServerBuildOptions);
   await Promise.all([context.watch(), authContext.watch()]);
   process.stderr.write('Watching for changes...\n');
+} else if (rescheduleOnly) {
+  await esbuild.build(rescheduleBuildOptions);
+
+  // Make the file executable on non-Windows platforms
+  if (process.platform !== 'win32') {
+    const { chmod } = await import('fs/promises');
+    await chmod(rescheduleBuildOptions.outfile, 0o755);
+  }
 } else {
   await Promise.all([
     esbuild.build(buildOptions),
-    esbuild.build(authServerBuildOptions)
+    esbuild.build(authServerBuildOptions),
+    esbuild.build(rescheduleBuildOptions),
+    esbuild.build(writeAuthBuildOptions)
   ]);
 
   // Make the file executable on non-Windows platforms
   if (process.platform !== 'win32') {
     const { chmod } = await import('fs/promises');
     await chmod(buildOptions.outfile, 0o755);
+    await chmod(rescheduleBuildOptions.outfile, 0o755);
+    await chmod(writeAuthBuildOptions.outfile, 0o755);
   }
 
   // Copy static files (HTML, CSS, etc.) to build directory

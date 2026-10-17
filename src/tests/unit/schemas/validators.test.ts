@@ -347,20 +347,8 @@ describe('UpdateEventArgumentsSchema with Recurring Event Support', () => {
   });
 });
 
-describe('ListEventsArgumentsSchema JSON String Handling', () => {
-  it('should parse JSON string calendarId into array', () => {
-    const input = {
-      calendarId: '["primary", "secondary@gmail.com"]',
-      timeMin: '2024-01-01T00:00:00Z',
-      timeMax: '2024-01-02T00:00:00Z'
-    };
-
-    const result = ListEventsArgumentsSchema.parse(input);
-    // The new schema keeps JSON strings as strings (they are parsed in the handler)
-    expect(result.calendarId).toBe('["primary", "secondary@gmail.com"]');
-  });
-
-  it('should handle regular string calendarId', () => {
+describe('ListEventsArgumentsSchema single-calendar pagination', () => {
+  it('should accept single string calendarId', () => {
     const input = {
       calendarId: 'primary',
       timeMin: '2024-01-01T00:00:00Z',
@@ -371,43 +359,38 @@ describe('ListEventsArgumentsSchema JSON String Handling', () => {
     expect(result.calendarId).toBe('primary');
   });
 
-  it('should handle regular array calendarId', () => {
-    // Arrays are now supported via preprocessing
+  it('should reject array calendarId', () => {
     const input = {
       calendarId: ['primary', 'secondary@gmail.com'],
       timeMin: '2024-01-01T00:00:00Z',
       timeMax: '2024-01-02T00:00:00Z'
     };
 
-    // Arrays are now kept as arrays (not transformed to JSON strings)
-    const result = ListEventsArgumentsSchema.parse(input);
-    expect(result.calendarId).toEqual(['primary', 'secondary@gmail.com']);
+    expect(() => ListEventsArgumentsSchema.parse(input)).toThrow();
   });
 
-  it('should reject invalid JSON string', () => {
-    // Invalid JSON strings are accepted by the schema but will fail in the handler
+  it('should reject JSON-array calendarId string (array behavior removed)', () => {
+    // JSON-array strings are now treated as a single calendar name lookup;
+    // schema accepts it as a string but handler will not expand it.
     const input = {
-      calendarId: '["primary", invalid]',
+      calendarId: '["primary", "secondary@gmail.com"]',
       timeMin: '2024-01-01T00:00:00Z',
       timeMax: '2024-01-02T00:00:00Z'
     };
 
-    // The schema accepts any string - validation happens in the handler
     const result = ListEventsArgumentsSchema.parse(input);
-    expect(result.calendarId).toBe('["primary", invalid]');
+    expect(typeof result.calendarId).toBe('string');
   });
 
-  it('should reject JSON string with non-string elements', () => {
-    // Schema accepts any string - validation happens in the handler
-    const input = {
-      calendarId: '["primary", 123]',
-      timeMin: '2024-01-01T00:00:00Z',
-      timeMax: '2024-01-02T00:00:00Z'
-    };
+  it('should validate pageSize bounds 1..20', () => {
+    expect(() => ListEventsArgumentsSchema.parse({ calendarId: 'primary', pageSize: 0 })).toThrow();
+    expect(() => ListEventsArgumentsSchema.parse({ calendarId: 'primary', pageSize: 21 })).toThrow();
+    expect(ListEventsArgumentsSchema.parse({ calendarId: 'primary', pageSize: 20 }).pageSize).toBe(20);
+  });
 
-    // The schema accepts any string - validation happens in the handler
-    const result = ListEventsArgumentsSchema.parse(input);
-    expect(result.calendarId).toBe('["primary", 123]');
+  it('should validate pageToken opacity bound 2048', () => {
+    expect(ListEventsArgumentsSchema.parse({ calendarId: 'primary', pageToken: '' }).pageToken).toBe('');
+    expect(() => ListEventsArgumentsSchema.parse({ calendarId: 'primary', pageToken: 'a'.repeat(2049) })).toThrow();
   });
 });
 

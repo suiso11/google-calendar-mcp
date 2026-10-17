@@ -5,19 +5,10 @@ import { BaseToolHandler } from "../handlers/core/BaseToolHandler.js";
 import { ALLOWED_EVENT_FIELDS } from "../utils/field-mask-builder.js";
 import { ServerConfig } from "../config/TransportConfig.js";
 
-// Import all handlers
-import { ListCalendarsHandler } from "../handlers/core/ListCalendarsHandler.js";
+// Import readonly handlers only (readonly-mode: write/list-colors/freebusy/current-time/respond handlers are unreachable)
 import { ListEventsHandler } from "../handlers/core/ListEventsHandler.js";
 import { SearchEventsHandler } from "../handlers/core/SearchEventsHandler.js";
 import { GetEventHandler } from "../handlers/core/GetEventHandler.js";
-import { ListColorsHandler } from "../handlers/core/ListColorsHandler.js";
-import { CreateEventHandler } from "../handlers/core/CreateEventHandler.js";
-import { CreateEventsHandler } from "../handlers/core/CreateEventsHandler.js";
-import { UpdateEventHandler } from "../handlers/core/UpdateEventHandler.js";
-import { DeleteEventHandler } from "../handlers/core/DeleteEventHandler.js";
-import { FreeBusyEventHandler } from "../handlers/core/FreeBusyEventHandler.js";
-import { GetCurrentTimeHandler } from "../handlers/core/GetCurrentTimeHandler.js";
-import { RespondToEventHandler } from "../handlers/core/RespondToEventHandler.js";
 
 // ============================================================================
 // SHARED VALIDATION PATTERNS
@@ -25,9 +16,9 @@ import { RespondToEventHandler } from "../handlers/core/RespondToEventHandler.js
 // Note: We use validation functions instead of shared schemas to avoid $ref
 // generation in JSON schema output, which can cause issues with some MCP clients.
 
-// ISO 8601 datetime regex patterns
-const ISO_DATETIME_WITH_TZ = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(Z|[+-]\d{2}:\d{2})$/;
-const ISO_DATETIME_WITHOUT_TZ = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/;
+// ISO 8601 datetime regex patterns (optional decimal fraction preserves Companion byte-for-byte bounds)
+const ISO_DATETIME_WITH_TZ = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$/;
+const ISO_DATETIME_WITHOUT_TZ = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?$/;
 const ISO_DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
 
 // Validation functions
@@ -146,7 +137,7 @@ const timeMaxSchema = z.string()
   .optional();
 
 const timeZoneSchema = z.string().optional().describe(
-  "IANA timezone (e.g., 'America/Los_Angeles'). Defaults to calendar's timezone."
+  "IANA timezone (e.g., 'America/Los_Angeles') for interpreting timezone-naive bounds. Defaults to UTC; no calendar metadata lookup."
 );
 
 /**
@@ -247,55 +238,32 @@ const multiAccountSchema = z.preprocess(
 
 // Define all tool schemas with TypeScript inference
 export const ToolSchemas = {
-  'list-calendars': z.object({
-    account: multiAccountSchema
-  }),
-
   'list-events': z.object({
-    account: multiAccountSchema,
-    calendarId: z.union([
-      z.string().describe(
-        "Calendar identifier(s) to query. Accepts calendar IDs (e.g., 'primary', 'user@gmail.com') OR calendar names (e.g., 'Work', 'Personal'). Single calendar: 'primary'. Multiple calendars: array ['Work', 'Personal'] or JSON string '[\"Work\", \"Personal\"]'"
-      ),
-      z.array(z.string().min(1))
-        .min(1, "At least one calendar ID is required")
-        .max(50, "Maximum 50 calendars allowed per request")
-        .refine(
-          (arr) => new Set(arr).size === arr.length,
-          "Duplicate calendar IDs are not allowed"
-        )
-        .describe("Array of calendar IDs to query events from (max 50, no duplicates)")
-    ]),
+    account: singleAccountSchema,
+    calendarId: z.string().min(1, "Calendar ID must be a non-empty string").describe(
+      "Exact calendar ID to query (e.g., 'primary', 'user@gmail.com', or an opaque calendar ID). Forwarded verbatim; calendar names are not resolved."
+    ),
     timeMin: timeMinSchema,
     timeMax: timeMaxSchema,
     timeZone: timeZoneSchema,
     fields: fieldsSchema,
     privateExtendedProperty: privateExtendedPropertySchema,
-    sharedExtendedProperty: sharedExtendedPropertySchema
+    sharedExtendedProperty: sharedExtendedPropertySchema,
+    pageSize: z.number().int().min(1).max(20).optional().describe(
+      "Maximum number of events per page (1-20). Passed as maxResults to the Calendar API."
+    ),
+    pageToken: z.string().max(2048, "pageToken must be at most 2048 characters").optional().describe(
+      "Opaque page token from a previous list-events response (nextPageToken). Passed through verbatim."
+    )
   }),
   
   'search-events': z.object({
-    account: multiAccountSchema,
-    calendarId: z.union([
-      z.string().describe(
-        "Calendar identifier(s) to search. Accepts calendar IDs (e.g., 'primary', 'user@gmail.com') OR calendar names (e.g., 'Work', 'Personal'). Single calendar: 'primary'. Multiple calendars: array ['Work', 'Personal'] or JSON string '[\"Work\", \"Personal\"]'"
-      ),
-      z.array(z.string())
-    ]).transform((val) => {
-      if (typeof val === 'string') {
-        // Try to parse JSON array if it looks like one
-        if (val.startsWith('[')) {
-          try {
-            const parsed = JSON.parse(val);
-            if (Array.isArray(parsed)) return parsed;
-          } catch { /* ignore */ }
-        }
-        return val;
-      }
-      return val;
-    }).describe("Calendar identifier(s) to search. Accepts calendar IDs or names. Single or multiple calendars supported."),
-    query: z.string().describe(
-      "Free text search query (searches summary, description, location, attendees, etc.)"
+    account: singleAccountSchema,
+    calendarId: z.string().min(1, "Calendar ID must be a non-empty string").describe(
+      "Exact calendar ID to search (e.g., 'primary', 'user@gmail.com', or an opaque calendar ID). Forwarded verbatim; calendar names are not resolved."
+    ),
+    query: z.string().min(1, "Query must be a non-empty string").optional().describe(
+      "Free text search query (searches summary, description, location, attendees, etc.). Omit to list events in the time range."
     ),
     timeMin: z.string()
       .refine(isValidIsoDateTime, "Must be ISO 8601 format: '2026-01-01T00:00:00'")
@@ -318,12 +286,18 @@ export const ToolSchemas = {
       .optional()
       .describe(
         "Filter by shared extended properties (key=value). Matches events that have all specified properties."
-      )
+      ),
+    pageSize: z.number().int().min(1).max(20).optional().describe(
+      "Maximum number of events per page (1-20). Passed as maxResults to the Calendar API."
+    ),
+    pageToken: z.string().max(2048, "pageToken must be at most 2048 characters").optional().describe(
+      "Opaque page token from a previous search-events response (nextPageToken). Passed through verbatim."
+    )
   }),
   
   'get-event': z.object({
     account: singleAccountSchema,
-    calendarId: z.string().describe("ID of the calendar (use 'primary' for the main calendar)"),
+    calendarId: z.string().describe("Exact calendar ID holding the event (e.g., 'primary', an email, or an opaque calendar ID). Forwarded verbatim; calendar names are not resolved."),
     eventId: z.string().describe("ID of the event to retrieve"),
     fields: z.array(z.enum(ALLOWED_EVENT_FIELDS)).optional().describe(
       "Optional array of additional event fields to retrieve. Available fields are strictly validated. Default fields (id, summary, start, end, status, htmlLink, location, attendees) are always included."
@@ -719,7 +693,7 @@ export const ToolSchemas = {
     calendarId: z.string().describe("ID of the calendar (use 'primary' for the main calendar)"),
     eventId: z.string().describe("ID of the event to respond to"),
     account: z.string().optional().describe(
-      "Account nickname to use for this operation (e.g., 'work', 'personal'). Optional when only one account is connected - will auto-select the account with appropriate permissions. Use 'list-calendars' to see available accounts."
+      "Account nickname to use for this operation (e.g., 'work', 'personal'). Optional when only one account is connected - will auto-select the account with appropriate permissions."
     ),
     response: z.enum(RESPONSE_STATUS_VALUES).describe(
       "Your response to the event invitation: 'accepted' (accept), 'declined' (decline), 'tentative' (maybe), 'needsAction' (no response)"
@@ -758,7 +732,6 @@ export type ToolInputs = {
 };
 
 // Export individual types for convenience
-export type ListCalendarsInput = ToolInputs['list-calendars'];
 export type ListEventsInput = ToolInputs['list-events'];
 export type SearchEventsInput = ToolInputs['search-events'];
 export type GetEventInput = ToolInputs['get-event'];
@@ -786,34 +759,6 @@ const READ_ONLY_ANNOTATIONS: ToolAnnotations = {
   openWorldHint: false
 };
 
-const WRITE_NON_DESTRUCTIVE_ANNOTATIONS: ToolAnnotations = {
-  readOnlyHint: false,
-  destructiveHint: false,
-  idempotentHint: false,
-  openWorldHint: false
-};
-
-const WRITE_DESTRUCTIVE_ANNOTATIONS: ToolAnnotations = {
-  readOnlyHint: false,
-  destructiveHint: true,
-  idempotentHint: false,
-  openWorldHint: false
-};
-
-const WRITE_DESTRUCTIVE_IDEMPOTENT_ANNOTATIONS: ToolAnnotations = {
-  readOnlyHint: false,
-  destructiveHint: true,
-  idempotentHint: true,
-  openWorldHint: false
-};
-
-const WRITE_NON_DESTRUCTIVE_IDEMPOTENT_ANNOTATIONS: ToolAnnotations = {
-  readOnlyHint: false,
-  destructiveHint: false,
-  idempotentHint: true,
-  openWorldHint: false
-};
-
 export class ToolRegistry {
   private static extractSchemaShape(schema: z.ZodType<any>): any {
     const schemaAny = schema as any;
@@ -829,86 +774,31 @@ export class ToolRegistry {
 
   private static tools: ToolDefinition[] = [
     {
-      name: "list-calendars",
-      title: "List Calendars",
-      description: "List all available calendars",
-      annotations: READ_ONLY_ANNOTATIONS,
-      schema: ToolSchemas['list-calendars'],
-      handler: ListCalendarsHandler
-    },
-    {
       name: "list-events",
       title: "List Calendar Events",
-      description: "List events from one or more calendars. Supports both calendar IDs and calendar names.",
+      description: "List events from a single calendar by exact calendar ID. Paginated via pageSize/pageToken.",
       annotations: READ_ONLY_ANNOTATIONS,
       schema: ToolSchemas['list-events'],
       handler: ListEventsHandler,
-      handlerFunction: async (args: ListEventsInput & { calendarId: string | string[] }) => {
-        let processedCalendarId: string | string[] = args.calendarId;
-
-        // If it's already an array (native array format), keep as-is (already validated by schema)
-        if (Array.isArray(args.calendarId)) {
-          processedCalendarId = args.calendarId;
-        }
-        // Handle JSON string format (double or single-quoted)
-        else if (typeof args.calendarId === 'string' && args.calendarId.trim().startsWith('[') && args.calendarId.trim().endsWith(']')) {
-          try {
-            let jsonString = args.calendarId.trim();
-
-            // Normalize single-quoted JSON-like strings to valid JSON (Python/shell style)
-            // Only replace single quotes that are string delimiters (after '[', ',', or before ']', ',')
-            // This avoids breaking calendar IDs with apostrophes like "John's Calendar"
-            if (jsonString.includes("'")) {
-              jsonString = jsonString
-                .replace(/\[\s*'/g, '["')           // [' -> ["
-                .replace(/'\s*,\s*'/g, '", "')      // ', ' -> ", "
-                .replace(/'\s*\]/g, '"]');          // '] -> "]
-            }
-
-            const parsed = JSON.parse(jsonString);
-
-            // Validate parsed result
-            if (!Array.isArray(parsed)) {
-              throw new Error('JSON string must contain an array');
-            }
-            if (!parsed.every(id => typeof id === 'string' && id.length > 0)) {
-              throw new Error('Array must contain only non-empty strings');
-            }
-            if (parsed.length === 0) {
-              throw new Error("At least one calendar ID is required");
-            }
-            if (parsed.length > 50) {
-              throw new Error("Maximum 50 calendars allowed");
-            }
-            if (new Set(parsed).size !== parsed.length) {
-              throw new Error("Duplicate calendar IDs are not allowed");
-            }
-
-            processedCalendarId = parsed;
-          } catch (error) {
-            throw new Error(
-              `Invalid JSON format for calendarId: ${error instanceof Error ? error.message : 'Unknown parsing error'}`
-            );
-          }
-        }
-        // Otherwise it's a single string calendar ID - keep as-is
-
+      handlerFunction: async (args: ListEventsInput) => {
         return {
           account: args.account,
-          calendarId: processedCalendarId,
+          calendarId: args.calendarId,
           timeMin: args.timeMin,
           timeMax: args.timeMax,
           timeZone: args.timeZone,
           fields: args.fields,
           privateExtendedProperty: args.privateExtendedProperty,
-          sharedExtendedProperty: args.sharedExtendedProperty
+          sharedExtendedProperty: args.sharedExtendedProperty,
+          pageSize: args.pageSize,
+          pageToken: args.pageToken
         };
       }
     },
     {
       name: "search-events",
       title: "Search Calendar Events",
-      description: "Search for events in a calendar by text query.",
+      description: "Search for events in a single calendar by exact calendar ID and text query. Paginated via pageSize/pageToken.",
       annotations: READ_ONLY_ANNOTATIONS,
       schema: ToolSchemas['search-events'],
       handler: SearchEventsHandler
@@ -916,74 +806,10 @@ export class ToolRegistry {
     {
       name: "get-event",
       title: "Get Event Details",
-      description: "Get details of a specific event by ID.",
+      description: "Get details of a specific event by exact calendar ID and event ID.",
       annotations: READ_ONLY_ANNOTATIONS,
       schema: ToolSchemas['get-event'],
       handler: GetEventHandler
-    },
-    {
-      name: "list-colors",
-      title: "List Calendar Colors",
-      description: "List available color IDs and their meanings for calendar events",
-      annotations: READ_ONLY_ANNOTATIONS,
-      schema: ToolSchemas['list-colors'],
-      handler: ListColorsHandler
-    },
-    {
-      name: "create-event",
-      title: "Create Calendar Event",
-      description: "Create a new calendar event.",
-      annotations: WRITE_NON_DESTRUCTIVE_ANNOTATIONS,
-      schema: ToolSchemas['create-event'],
-      handler: CreateEventHandler
-    },
-    {
-      name: "create-events",
-      title: "Create Calendar Events (Bulk)",
-      description: "Create multiple calendar events in bulk. Accepts shared defaults (account, calendarId, timeZone) that apply to all events, with per-event overrides. Skips conflict and duplicate detection for speed.",
-      annotations: WRITE_NON_DESTRUCTIVE_ANNOTATIONS,
-      schema: ToolSchemas['create-events'],
-      handler: CreateEventsHandler
-    },
-    {
-      name: "update-event",
-      title: "Update Calendar Event",
-      description: "Update an existing calendar event with recurring event modification scope support.",
-      annotations: WRITE_DESTRUCTIVE_IDEMPOTENT_ANNOTATIONS,
-      schema: ToolSchemas['update-event'],
-      handler: UpdateEventHandler
-    },
-    {
-      name: "delete-event",
-      title: "Delete Calendar Event",
-      description: "Delete a calendar event.",
-      annotations: WRITE_DESTRUCTIVE_ANNOTATIONS,
-      schema: ToolSchemas['delete-event'],
-      handler: DeleteEventHandler
-    },
-    {
-      name: "get-freebusy",
-      title: "Get Free/Busy",
-      description: "Query free/busy information for calendars. Note: Time range is limited to a maximum of 3 months between timeMin and timeMax.",
-      annotations: READ_ONLY_ANNOTATIONS,
-      schema: ToolSchemas['get-freebusy'],
-      handler: FreeBusyEventHandler
-    },
-    {
-      name: "get-current-time",
-      title: "Get Current Time",
-      description: "Get the current date and time. Call this FIRST before creating, updating, or searching for events to ensure you have accurate date context for scheduling.",
-      annotations: READ_ONLY_ANNOTATIONS,
-      schema: ToolSchemas['get-current-time'],
-      handler: GetCurrentTimeHandler
-    },
-    {
-      name: "respond-to-event",
-      title: "Respond to Event Invitation",
-      description: "Respond to a calendar event invitation with Accept, Decline, Maybe (Tentative), or No Response.",
-      annotations: WRITE_NON_DESTRUCTIVE_IDEMPOTENT_ANNOTATIONS,
-      schema: ToolSchemas['respond-to-event'],
-      handler: RespondToEventHandler
     }
   ];
 
@@ -999,52 +825,12 @@ export class ToolRegistry {
   }
 
   /**
-   * Normalizes datetime fields from object format to string format
-   * Converts { date: "2025-01-01" } or { dateTime: "...", timeZone: "..." } to simple strings
-   * This allows accepting both Google Calendar API format and our simplified format
+   * Normalizes datetime fields from object format to string format.
+   * Readonly-mode: the readonly surface carries no object-form datetime
+   * fields, so this is a pass-through kept for a stable call site.
    */
-  private static normalizeDateTimeFields(toolName: string, args: any): any {
-    // Only normalize for tools that have datetime fields
-    const toolsWithDateTime = ['create-event', 'update-event', 'create-events'];
-    if (!toolsWithDateTime.includes(toolName)) {
-      return args;
-    }
-
-    const normalized = { ...args };
-    const dateTimeFields = ['start', 'end', 'originalStartTime', 'futureStartDate'];
-
-    // Handle nested events array for create-events
-    if (toolName === 'create-events' && Array.isArray(normalized.events)) {
-      normalized.events = normalized.events.map((event: any) => {
-        const normalizedEvent = { ...event };
-        for (const field of dateTimeFields) {
-          if (normalizedEvent[field] && typeof normalizedEvent[field] === 'object') {
-            const obj = normalizedEvent[field];
-            if (obj.date) {
-              normalizedEvent[field] = obj.date;
-            } else if (obj.dateTime) {
-              normalizedEvent[field] = obj.dateTime;
-            }
-          }
-        }
-        return normalizedEvent;
-      });
-      return normalized;
-    }
-
-    for (const field of dateTimeFields) {
-      if (normalized[field] && typeof normalized[field] === 'object') {
-        const obj = normalized[field];
-        // Convert object format to string format
-        if (obj.date) {
-          normalized[field] = obj.date;
-        } else if (obj.dateTime) {
-          normalized[field] = obj.dateTime;
-        }
-      }
-    }
-
-    return normalized;
+  private static normalizeDateTimeFields(_toolName: string, args: any): any {
+    return args;
   }
 
   /**
@@ -1059,11 +845,11 @@ export class ToolRegistry {
    * @throws Error if any tool name is invalid
    */
   static validateToolNames(toolNames: string[]): void {
-    const availableTools = new Set([...this.getAvailableToolNames(), 'manage-accounts']);
+    const availableTools = new Set(this.getAvailableToolNames());
     const invalidTools = toolNames.filter(name => !availableTools.has(name));
 
     if (invalidTools.length > 0) {
-      const available = [...this.getAvailableToolNames(), 'manage-accounts'].join(', ');
+      const available = this.getAvailableToolNames().join(', ');
       throw new Error(
         `Invalid tool name(s): ${invalidTools.join(', ')}. ` +
         `Available tools: ${available}`

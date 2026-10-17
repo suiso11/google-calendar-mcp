@@ -6,7 +6,6 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { OAuth2Client } from "google-auth-library";
 
 // Import tool handlers to test them directly
-import { ListCalendarsHandler } from "../../handlers/core/ListCalendarsHandler.js";
 import { CreateEventHandler } from "../../handlers/core/CreateEventHandler.js";
 import { ListEventsHandler } from "../../handlers/core/ListEventsHandler.js";
 
@@ -76,77 +75,6 @@ describe('Google Calendar MCP Server', () => {
   });
 
   describe('Tool Handlers', () => {
-    it('should handle list-calendars tool correctly', async () => {
-      const handler = new ListCalendarsHandler();
-      const { google } = await import('googleapis');
-      const mockCalendarApi = google.calendar('v3');
-
-      // Mock the API response
-      (mockCalendarApi.calendarList.list as any).mockResolvedValue({
-        data: {
-          items: [
-            { 
-              id: 'cal1', 
-              summary: 'Work Calendar',
-              timeZone: 'America/New_York',
-              kind: 'calendar#calendarListEntry',
-              accessRole: 'owner',
-              primary: true,
-              selected: true,
-              hidden: false,
-              backgroundColor: '#0D7377',
-              defaultReminders: [
-                { method: 'popup', minutes: 15 },
-                { method: 'email', minutes: 60 }
-              ],
-              description: 'Work-related events and meetings'
-            },
-            { 
-              id: 'cal2', 
-              summary: 'Personal',
-              timeZone: 'America/Los_Angeles',
-              kind: 'calendar#calendarListEntry',
-              accessRole: 'reader',
-              primary: false,
-              selected: true,
-              hidden: false,
-              backgroundColor: '#D50000'
-            },
-          ]
-        }
-      });
-
-      const result = await handler.runTool({}, mockAccounts);
-
-      expect(mockCalendarApi.calendarList.list).toHaveBeenCalled();
-
-      // Parse the JSON response
-      const response = JSON.parse((result.content as any)[0].text);
-
-      expect(response.totalCount).toBe(2);
-      expect(response.calendars).toHaveLength(2);
-      expect(response.calendars[0]).toMatchObject({
-        id: 'cal1',
-        summary: 'Work Calendar',
-        description: 'Work-related events and meetings',
-        timeZone: 'America/New_York',
-        backgroundColor: '#0D7377',
-        accessRole: 'owner',
-        primary: true,
-        selected: true,
-        hidden: false
-      });
-      expect(response.calendars[0].defaultReminders).toHaveLength(2);
-      expect(response.calendars[1]).toMatchObject({
-        id: 'cal2',
-        summary: 'Personal',
-        timeZone: 'America/Los_Angeles',
-        backgroundColor: '#D50000',
-        accessRole: 'reader',
-        primary: false
-      });
-    });
-
     it('should handle create-event tool with valid arguments', async () => {
       const handler = new CreateEventHandler();
       const { google } = await import('googleapis');
@@ -306,7 +234,8 @@ describe('Google Calendar MCP Server', () => {
         timeMin: listEventsArgs.timeMin,
         timeMax: listEventsArgs.timeMax,
         singleEvents: true,
-        orderBy: 'startTime'
+        orderBy: 'startTime',
+        maxResults: 20
       });
 
       // Should return structured JSON with events

@@ -119,45 +119,35 @@ else
   echo "$CALENDARS_RESPONSE"
 fi
 
-# Test 5: Call list-colors tool
-echo -e "\n🎨 Testing list-colors tool..."
+# Test 5: Call list-calendars tool (readonly check)
+echo -e "\n📅 Testing list-calendars tool (readonly check)..."
 
-LIST_COLORS_REQUEST='{
+LIST_CALENDARS_CHECK_REQUEST='{
   "jsonrpc": "2.0",
   "id": 4,
   "method": "tools/call",
   "params": {
-    "name": "list-colors",
+    "name": "list-calendars",
     "arguments": {}
   }
 }'
 
-COLORS_RESPONSE=$(curl -s -X POST "$SERVER_URL" \
+CALENDARS_CHECK_RESPONSE=$(curl -s -X POST "$SERVER_URL" \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
   -H "mcp-session-id: $SESSION_ID" \
-  -d "$LIST_COLORS_REQUEST")
+  -d "$LIST_CALENDARS_CHECK_REQUEST")
 
 # Parse response appropriately
-if echo "$COLORS_RESPONSE" | jq '.' >/dev/null 2>&1; then
-  # Extract nested JSON and display color summary
-  echo "$COLORS_RESPONSE" | jq -r '.result.content[0].text' | jq '{
-    eventColors: .event | length,
-    calendarColors: .calendar | length,
-    sampleEventColor: .event["1"],
-    sampleCalendarColor: .calendar["1"]
-  }'
-elif echo "$COLORS_RESPONSE" | grep -q "^data:"; then
-  # SSE format
-  echo "$COLORS_RESPONSE" | grep "^data:" | sed 's/^data: //' | jq -r '.result.content[0].text' | jq '{
-    eventColors: .event | length,
-    calendarColors: .calendar | length,
-    sampleEventColor: .event["1"],
-    sampleCalendarColor: .calendar["1"]
-  }'
+if echo "$CALENDARS_CHECK_RESPONSE" | jq '.' >/dev/null 2>&1; then
+  # Extract the nested JSON from content[0].text and parse it
+  echo "$CALENDARS_CHECK_RESPONSE" | jq -r '.result.content[0].text' | jq '.calendars[] | {id, summary, timeZone, accessRole}'
+elif echo "$CALENDARS_CHECK_RESPONSE" | grep -q "^data:"; then
+  # SSE format - extract data, then nested content
+  echo "$CALENDARS_CHECK_RESPONSE" | grep "^data:" | sed 's/^data: //' | jq -r '.result.content[0].text' | jq '.calendars[] | {id, summary, timeZone, accessRole}'
 else
-  echo "❌ List colors failed - unknown format"
-  echo "$COLORS_RESPONSE"
+  echo "❌ List calendars check failed - unknown format"
+  echo "$CALENDARS_CHECK_RESPONSE"
 fi
 
 echo -e "\n✅ HTTP testing completed!"

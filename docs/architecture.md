@@ -7,7 +7,7 @@
 
 ## Authentication System
 
-OAuth 2.0 with refresh tokens, multi-account support, secure storage in `~/.config/google-calendar-mcp/tokens.json`.
+OAuth 2.0 with refresh tokens, readonly `calendar.events.readonly` scope only, and secure storage. Accounts are provisioned out of band via the standalone auth command or the local HTTP account page; there is no account-management MCP/model tool.
 
 ## Handler Architecture
 
@@ -22,28 +22,21 @@ Client → Transport → Schema Validation → Handler → Google API → Respon
 
 ## MCP Tools
 
-The server provides calendar management tools that LLMs can use for calendar operations:
+This readonly fork exposes exactly four MCP tools for read-only calendar queries. There are no write, free/busy, color, current-time, or account-management tools.
 
 ### Available Tools
 
-- `list-calendars` - List all available calendars
-- `list-events` - List events with date filtering
-- `search-events` - Search events by text query
-- `get-event` - Get details of a specific event by ID
-- `create-event` - Create new calendar events
-- `update-event` - Update existing events
-- `delete-event` - Delete events
-- `respond-to-event` - Accept, decline, or tentatively accept event invitations
-- `get-freebusy` - Check availability across calendars
-- `list-colors` - List available event colors
-- `get-current-time` - Get current system time and timezone information
-- `manage-accounts` - Manage Google account authentication (list, add, remove)
+- `list-calendars` - List known calendars for ID/name resolution (calendarList access remains an adoption gate pending fresh-grant validation; availability is not claimed)
+- `list-events` - List events from exactly one account and one calendar; paginated via `pageSize` (1-20) / `pageToken`
+- `search-events` - Search events by text query in exactly one account and one calendar over a required time range; paginated via `pageSize` (1-20) / `pageToken`
+- `get-event` - Get details of a specific event by ID (single account, single calendar)
+
+`list-events` and `search-events` require exactly one account and one calendar per request. There is no multi-account merge and no multi-calendar fan-out.
 
 ## Key Features
 
 - **Auto-registration**: Handlers automatically discovered
-- **Multi-account**: Normal/test account support  
+- **Read-only**: No create/update/delete or respond operations
+- **Single account/calendar per request**: No merged or fan-out queries
+- **Cursor pagination**: `pageSize` (1-20) with opaque `pageToken` passthrough
 - **Rate limiting**: Respects Google Calendar quotas
-- **Batch operations**: Efficient multi-calendar queries
-- **Recurring events**: Advanced modification scopes
-- **Contextual resources**: Real-time date/time information

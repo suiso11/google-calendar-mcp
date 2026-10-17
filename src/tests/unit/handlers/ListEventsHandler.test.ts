@@ -4,7 +4,11 @@ import { OAuth2Client } from 'google-auth-library';
 import { google } from 'googleapis';
 import { convertToRFC3339 } from '../../../utils/datetime.js';
 
-// Mock googleapis globally
+// Mock googleapis globally. calendarList/calendars metadata endpoints throw so
+// any metadata I/O on the MCP path fails the test (0-metadata proof).
+const metadataError = () => {
+  throw new Error('metadata I/O is not allowed on the events readonly path');
+};
 vi.mock('googleapis', () => ({
   google: {
     calendar: vi.fn(() => ({
@@ -12,13 +16,23 @@ vi.mock('googleapis', () => ({
         list: vi.fn()
       },
       calendarList: {
-        get: vi.fn()
+        get: vi.fn(() => {
+          throw new Error('metadata I/O is not allowed on the events readonly path');
+        }),
+        list: vi.fn(() => {
+          throw new Error('metadata I/O is not allowed on the events readonly path');
+        })
+      },
+      calendars: {
+        get: vi.fn(() => {
+          throw new Error('metadata I/O is not allowed on the events readonly path');
+        })
       }
     }))
   }
 }));
 
-describe('ListEventsHandler JSON String Handling', () => {
+describe('ListEventsHandler single-calendar pagination', () => {
   const mockOAuth2Client = {
     getAccessToken: vi.fn().mockResolvedValue({ token: 'mock-token' })
   } as unknown as OAuth2Client;
@@ -45,40 +59,17 @@ describe('ListEventsHandler JSON String Handling', () => {
         })
       },
       calendarList: {
-        get: vi.fn().mockResolvedValue({
-          data: { timeZone: 'UTC' }
-        }),
-        list: vi.fn().mockResolvedValue({
-          data: {
-            items: [
-              { id: 'primary', summary: 'Primary Calendar' },
-              { id: 'work@example.com', summary: 'Work Calendar' },
-              { id: 'personal@example.com', summary: 'Personal Calendar' }
-            ]
-          }
-        })
+        get: vi.fn(metadataError),
+        list: vi.fn(metadataError)
+      },
+      calendars: {
+        get: vi.fn(metadataError)
       }
     };
     vi.mocked(google.calendar).mockReturnValue(mockCalendar);
   });
 
-  // Mock fetch for batch requests
-  global.fetch = vi.fn().mockResolvedValue({
-    ok: true,
-    status: 200,
-    text: () => Promise.resolve(`--batch_boundary
-Content-Type: application/http
-Content-ID: <item1>
-
-HTTP/1.1 200 OK
-Content-Type: application/json
-
-{"items": [{"id": "test-event", "summary": "Test Event", "start": {"dateTime": "2025-06-02T10:00:00Z"}, "end": {"dateTime": "2025-06-02T11:00:00Z"}}]}
-
---batch_boundary--`)
-  });
-
-  it('should handle single calendar ID as string', async () => {
+  it('should handle single calendar ID as string with exactly one API call', async () => {
     const args = {
       calendarId: 'primary',
       timeMin: '2025-06-02T00:00:00Z',
@@ -86,50 +77,200 @@ Content-Type: application/json
     };
 
     const result = await handler.runTool(args, mockAccounts);
+    expect(mockCalendar.events.list).toHaveBeenCalledTimes(1);
+    const callArgs = mockCalendar.events.list.mock.calls[0][0];
+    expect(callArgs.calendarId).toBe('primary');
+    expect(callArgs.timeMin).toBe('2025-06-02T00:00:00Z');
+    expect(callArgs.timeMax).toBe('2025-06-09T23:59:59Z');
+    expect(mockCalendar.calendarList.list).not.toHaveBeenCalled();
+    expect(mockCalendar.calendarList.get).not.toHaveBeenCalled();
+    expect(mockCalendar.calendars.get).not.toHaveBeenCalled();
     expect(result.content).toHaveLength(1);
-    expect(result.content[0].type).toBe('text');
     const response = JSON.parse((result.content[0] as any).text);
     expect(response.events).toBeDefined();
-    expect(response.totalCount).toBeGreaterThanOrEqual(0);
+    expect(response.totalCount).toBe(1);
+    expect(response.events[0].calendarId).toBe('primary');
+    expect(response.events[0].accountId).toBe('test');
+    expect(response.nextPageToken).toBeUndefined();
   });
 
-  it('should handle multiple calendar IDs as array', async () => {
+  it('should forward email and opaque calendar IDs byte-for-byte with no metadata', async () => {
+    for (const calendarId of ['user@gmail.com', 'opaque-calendar-id_123']) {
+      mockCalendar.events.list.mockClear();
+      mockCalendar.calendarList.list.mockClear();
+      mockCalendar.calendarList.get.mockClear();
+      await handler.runTool({ calendarId }, mockAccounts);
+      expect(mockCalendar.events.list).toHaveBeenCalledTimes(1);
+      expect(mockCalendar.events.list.mock.calls[0][0].calendarId).toBe(calendarId);
+      expect(mockCalendar.calendarList.list).not.toHaveBeenCalled();
+      expect(mockCalendar.calendarList.get).not.toHaveBeenCalled();
+      expect(mockCalendar.calendars.get).not.toHaveBeenCalled();
+    }
+  });
+
+  it('should forward name-like calendar IDs verbatim with no resolution', async () => {
+    await handler.runTool({ calendarId: 'Work Calendar' }, mockAccounts);
+    expect(mockCalendar.events.list).toHaveBeenCalledTimes(1);
+    expect(mockCalendar.events.list.mock.calls[0][0].calendarId).toBe('Work Calendar');
+    expect(mockCalendar.calendarList.list).not.toHaveBeenCalled();
+    expect(mockCalendar.calendarList.get).not.toHaveBeenCalled();
+  });
+
+  it('should select the explicitly requested account client', async () => {
+    const workClient = { getAccessToken: vi.fn() } as unknown as OAuth2Client;
+    const personalClient = { getAccessToken: vi.fn() } as unknown as OAuth2Client;
+    const multi = new Map<string, OAuth2Client>([
+      ['work', workClient],
+      ['personal', personalClient]
+    ]);
+    const result = await handler.runTool(
+      { calendarId: 'primary', account: 'personal' },
+      multi
+    );
+    expect(mockCalendar.events.list).toHaveBeenCalledTimes(1);
+    expect(mockCalendar.events.list.mock.calls[0][0].calendarId).toBe('primary');
+    // The provider client must be built from the explicitly selected account
+    const calendarCtorCalls = (google.calendar as any).mock.calls;
+    expect(calendarCtorCalls.length).toBeGreaterThan(0);
+    expect(calendarCtorCalls[calendarCtorCalls.length - 1][0].auth).toBe(personalClient);
+    expect(mockCalendar.calendarList.list).not.toHaveBeenCalled();
+    expect(mockCalendar.calendarList.get).not.toHaveBeenCalled();
+    expect(result.content).toHaveLength(1);
+  });
+
+  it('should reject array calendarId', async () => {
     const args = {
       calendarId: ['primary', 'secondary@gmail.com'],
       timeMin: '2025-06-02T00:00:00Z',
       timeMax: '2025-06-09T23:59:59Z'
-    };
+    } as any;
 
-    const result = await handler.runTool(args, mockAccounts);
-    expect(result.content).toHaveLength(1);
-    expect(result.content[0].type).toBe('text');
-    const response = JSON.parse((result.content[0] as any).text);
-    expect(response.events).toBeDefined();
-    expect(response.totalCount).toBeGreaterThanOrEqual(0);
+    await expect(handler.runTool(args, mockAccounts)).rejects.toThrow(/exactly one.*calendarId/i);
+    expect(mockCalendar.events.list).not.toHaveBeenCalled();
   });
 
-  it('should handle calendar IDs passed as JSON string', async () => {
-    // This simulates the problematic case from the user
+  it('should not expand JSON-array calendarId string (single opaque ID, one API call)', async () => {
     const args = {
       calendarId: '["primary", "secondary@gmail.com"]',
       timeMin: '2025-06-02T00:00:00Z',
       timeMax: '2025-06-09T23:59:59Z'
     };
 
-    // This would be parsed by the Zod transform before reaching the handler
-    // For testing, we'll manually simulate what the transform should do
-    let processedArgs = { ...args };
-    if (typeof args.calendarId === 'string' && args.calendarId.startsWith('[')) {
-      processedArgs.calendarId = JSON.parse(args.calendarId);
-    }
-
-    const result = await handler.runTool(processedArgs, mockAccounts);
+    // No array expansion: treated as one opaque calendar identifier.
+    const result = await handler.runTool(args, mockAccounts);
+    expect(mockCalendar.events.list).toHaveBeenCalledTimes(1);
+    const callArgs = mockCalendar.events.list.mock.calls[0][0];
+    expect(callArgs.calendarId).toBe('["primary", "secondary@gmail.com"]');
+    expect(mockCalendar.calendarList.list).not.toHaveBeenCalled();
     expect(result.content).toHaveLength(1);
-    expect(result.content[0].type).toBe('text');
+  });
+
+  it('should pass pageSize as maxResults exactly and pageToken verbatim', async () => {
+    mockCalendar.events.list.mockResolvedValueOnce({
+      data: {
+        items: [],
+        nextPageToken: 'opaque-cursor-123'
+      }
+    });
+    const args = {
+      calendarId: 'primary',
+      timeMin: '2025-06-02T00:00:00Z',
+      timeMax: '2025-06-09T23:59:59Z',
+      pageSize: 5,
+      pageToken: 'opaque-cursor-abc'
+    };
+
+    const result = await handler.runTool(args, mockAccounts);
+    expect(mockCalendar.events.list).toHaveBeenCalledTimes(1);
+    const callArgs = mockCalendar.events.list.mock.calls[0][0];
+    expect(callArgs.maxResults).toBe(5);
+    expect(callArgs.pageToken).toBe('opaque-cursor-abc');
     const response = JSON.parse((result.content[0] as any).text);
-    expect(response.events).toBeDefined();
-    expect(response.totalCount).toBeGreaterThanOrEqual(0);
-    expect(response.calendars).toEqual(['primary', 'secondary@gmail.com']);
+    expect(response.nextPageToken).toBe('opaque-cursor-123');
+    expect(response.totalCount).toBe(0);
+  });
+
+  it('should propagate empty pageToken verbatim to the API', async () => {
+    const args = {
+      calendarId: 'primary',
+      timeMin: '2025-06-02T00:00:00Z',
+      pageSize: 10,
+      pageToken: ''
+    };
+
+    await handler.runTool(args, mockAccounts);
+    const callArgs = mockCalendar.events.list.mock.calls[0][0];
+    expect(callArgs.pageToken).toBe('');
+    expect(callArgs.maxResults).toBe(10);
+  });
+
+  it('should propagate empty nextPageToken verbatim in response', async () => {
+    mockCalendar.events.list.mockResolvedValueOnce({
+      data: { items: [], nextPageToken: '' }
+    });
+    const result = await handler.runTool({ calendarId: 'primary' }, mockAccounts);
+    const response = JSON.parse((result.content[0] as any).text);
+    expect('nextPageToken' in response).toBe(true);
+    expect(response.nextPageToken).toBe('');
+  });
+
+  it('should send bounded maxResults 20 when pageSize omitted (no auto-pagination)', async () => {
+    await handler.runTool({ calendarId: 'primary' }, mockAccounts);
+    const callArgs = mockCalendar.events.list.mock.calls[0][0];
+    expect(callArgs.maxResults).toBe(20);
+    expect('pageToken' in callArgs).toBe(false);
+    expect(mockCalendar.events.list).toHaveBeenCalledTimes(1);
+  });
+
+  it('should reject multiple accounts', async () => {
+    const multi = new Map<string, OAuth2Client>([
+      ['work', mockOAuth2Client],
+      ['personal', mockOAuth2Client]
+    ]);
+    await expect(handler.runTool(
+      { calendarId: 'primary', account: ['work', 'personal'] } as any,
+      multi
+    )).rejects.toThrow(/exactly one account/i);
+  });
+
+  it('should reject omitted account when multiple credentials exist before any provider I/O', async () => {
+    const multi = new Map<string, OAuth2Client>([
+      ['work', mockOAuth2Client],
+      ['personal', mockOAuth2Client]
+    ]);
+    await expect(handler.runTool({ calendarId: 'primary' }, multi)).rejects.toThrow(/exactly one account/i);
+    expect(mockCalendar.events.list).not.toHaveBeenCalled();
+    expect(mockCalendar.calendarList.list).not.toHaveBeenCalled();
+    expect(mockCalendar.calendarList.get).not.toHaveBeenCalled();
+    expect(mockCalendar.calendars.get).not.toHaveBeenCalled();
+  });
+
+  it('should reject unknown accounts before any provider I/O', async () => {
+    await expect(
+      handler.runTool({ calendarId: 'primary', account: 'nope' }, mockAccounts)
+    ).rejects.toThrow(/not found/i);
+    expect(mockCalendar.events.list).not.toHaveBeenCalled();
+    expect(mockCalendar.calendarList.list).not.toHaveBeenCalled();
+    expect(mockCalendar.calendarList.get).not.toHaveBeenCalled();
+  });
+
+  it('should preserve filters and tag account/calendar', async () => {
+    const args = {
+      calendarId: 'primary',
+      timeMin: '2025-06-02T00:00:00Z',
+      timeMax: '2025-06-09T23:59:59Z',
+      fields: ['description'],
+      privateExtendedProperty: ['k=v'],
+      sharedExtendedProperty: ['s=v']
+    };
+    const result = await handler.runTool(args, mockAccounts);
+    const callArgs = mockCalendar.events.list.mock.calls[0][0];
+    expect(callArgs.privateExtendedProperty).toEqual(['k=v']);
+    expect(callArgs.sharedExtendedProperty).toEqual(['s=v']);
+    expect(callArgs.fields).toBeDefined();
+    const response = JSON.parse((result.content[0] as any).text);
+    expect(response.events[0].accountId).toBe('test');
+    expect(response.events[0].calendarId).toBe('primary');
   });
 });
 
@@ -148,15 +289,11 @@ describe('ListEventsHandler - Timezone Handling', () => {
         list: vi.fn()
       },
       calendarList: {
-        get: vi.fn(),
-        list: vi.fn().mockResolvedValue({
-          data: {
-            items: [
-              { id: 'primary', summary: 'Primary Calendar' },
-              { id: 'work@example.com', summary: 'Work Calendar' }
-            ]
-          }
-        })
+        get: vi.fn(metadataError),
+        list: vi.fn(metadataError)
+      },
+      calendars: {
+        get: vi.fn(metadataError)
       }
     };
     vi.mocked(google.calendar).mockReturnValue(mockCalendar);
@@ -167,9 +304,9 @@ describe('ListEventsHandler - Timezone Handling', () => {
       // Test the core issue: timezone-naive datetime should be interpreted in the target timezone
       const datetime = '2025-01-01T10:00:00';
       const timezone = 'America/Los_Angeles';
-      
+
       const result = convertToRFC3339(datetime, timezone);
-      
+
       // In January 2025, Los Angeles is UTC-8 (PST)
       // 10:00 AM PST = 18:00 UTC
       // The result should be '2025-01-01T18:00:00Z'
@@ -179,9 +316,9 @@ describe('ListEventsHandler - Timezone Handling', () => {
     it('should correctly convert timezone-naive datetime to New York time', () => {
       const datetime = '2025-01-01T10:00:00';
       const timezone = 'America/New_York';
-      
+
       const result = convertToRFC3339(datetime, timezone);
-      
+
       // In January 2025, New York is UTC-5 (EST)
       // 10:00 AM EST = 15:00 UTC
       expect(result).toBe('2025-01-01T15:00:00Z');
@@ -190,9 +327,9 @@ describe('ListEventsHandler - Timezone Handling', () => {
     it('should correctly convert timezone-naive datetime to London time', () => {
       const datetime = '2025-01-01T10:00:00';
       const timezone = 'Europe/London';
-      
+
       const result = convertToRFC3339(datetime, timezone);
-      
+
       // In January 2025, London is UTC+0 (GMT)
       // 10:00 AM GMT = 10:00 UTC
       expect(result).toBe('2025-01-01T10:00:00Z');
@@ -202,9 +339,9 @@ describe('ListEventsHandler - Timezone Handling', () => {
       // Test during DST period
       const datetime = '2025-07-01T10:00:00';
       const timezone = 'America/Los_Angeles';
-      
+
       const result = convertToRFC3339(datetime, timezone);
-      
+
       // In July 2025, Los Angeles is UTC-7 (PDT)
       // 10:00 AM PDT = 17:00 UTC
       expect(result).toBe('2025-07-01T17:00:00Z');
@@ -213,9 +350,9 @@ describe('ListEventsHandler - Timezone Handling', () => {
     it('should leave timezone-aware datetime unchanged', () => {
       const datetime = '2025-01-01T10:00:00-08:00';
       const timezone = 'America/Los_Angeles';
-      
+
       const result = convertToRFC3339(datetime, timezone);
-      
+
       // Should remain unchanged since it already has timezone info
       expect(result).toBe('2025-01-01T10:00:00-08:00');
     });
@@ -223,12 +360,7 @@ describe('ListEventsHandler - Timezone Handling', () => {
 
   describe('ListEventsHandler timezone parameter usage', () => {
     beforeEach(() => {
-      // Mock successful calendar list response
-      mockCalendar.calendarList.get.mockResolvedValue({
-        data: { timeZone: 'UTC' }
-      });
-      
-      // Mock successful events list response
+      // Mock successful events list response (no calendar metadata available)
       mockCalendar.events.list.mockResolvedValue({
         data: { items: [] }
       });
@@ -250,8 +382,10 @@ describe('ListEventsHandler - Timezone Handling', () => {
         timeMin: '2025-01-01T18:00:00Z', // 10:00 AM PST = 18:00 UTC
         timeMax: '2025-01-02T02:00:00Z', // 18:00 PM PST = 02:00 UTC next day
         singleEvents: true,
-        orderBy: 'startTime'
+        orderBy: 'startTime',
+        maxResults: 20
       });
+      expect(mockCalendar.calendarList.get).not.toHaveBeenCalled();
     });
 
     it('should preserve timezone-aware timeMin/timeMax regardless of timeZone parameter', async () => {
@@ -270,33 +404,32 @@ describe('ListEventsHandler - Timezone Handling', () => {
         timeMin: '2025-01-01T10:00:00-08:00',
         timeMax: '2025-01-01T18:00:00-08:00',
         singleEvents: true,
-        orderBy: 'startTime'
+        orderBy: 'startTime',
+        maxResults: 20
       });
     });
 
-    it('should fall back to calendar timezone when timeZone parameter not provided', async () => {
-      // Mock calendar with Los Angeles timezone
-      mockCalendar.calendarList.get.mockResolvedValue({
-        data: { timeZone: 'America/Los_Angeles' }
-      });
-
+    it('should fall back to deterministic UTC when timeZone parameter not provided', async () => {
       const args = {
         calendarId: 'primary',
         timeMin: '2025-01-01T10:00:00',
         timeMax: '2025-01-01T18:00:00'
-        // No timeZone parameter
+        // No timeZone parameter: deterministic UTC, no calendar metadata lookup
       };
 
       await handler.runTool(args, mockAccounts);
 
-      // Verify that the calendar's timezone is used for conversion
+      // Verify UTC is used for conversion with no metadata I/O
       expect(mockCalendar.events.list).toHaveBeenCalledWith({
         calendarId: 'primary',
-        timeMin: '2025-01-01T18:00:00Z', // 10:00 AM PST = 18:00 UTC
-        timeMax: '2025-01-02T02:00:00Z', // 18:00 PM PST = 02:00 UTC next day
+        timeMin: '2025-01-01T10:00:00Z',
+        timeMax: '2025-01-01T18:00:00Z',
         singleEvents: true,
-        orderBy: 'startTime'
+        orderBy: 'startTime',
+        maxResults: 20
       });
+      expect(mockCalendar.calendarList.get).not.toHaveBeenCalled();
+      expect(mockCalendar.calendarList.list).not.toHaveBeenCalled();
     });
 
     it('should handle UTC timezone correctly', async () => {
@@ -315,137 +448,44 @@ describe('ListEventsHandler - Timezone Handling', () => {
         timeMin: '2025-01-01T10:00:00Z',
         timeMax: '2025-01-01T18:00:00Z',
         singleEvents: true,
-        orderBy: 'startTime'
+        orderBy: 'startTime',
+        maxResults: 20
       });
     });
   });
-});
 
-describe('ListEventsHandler - Multi-account merging', () => {
-  let handler: ListEventsHandler;
-  let workClient: OAuth2Client;
-  let personalClient: OAuth2Client;
-  let accounts: Map<string, OAuth2Client>;
-
-  beforeEach(() => {
-    handler = new ListEventsHandler();
-    workClient = new OAuth2Client();
-    personalClient = new OAuth2Client();
-    accounts = new Map([
-      ['work', workClient],
-      ['personal', personalClient]
-    ]);
-
-    vi.spyOn(handler as any, 'resolveCalendarIds').mockImplementation(async (_client, ids: string[]) => ids);
-    vi.spyOn(handler as any, 'getCalendarTimezone').mockResolvedValue('UTC');
-
-    // Mock calendarRegistry.resolveCalendarsToAccounts for multi-account routing
-    // Default: route 'primary' calendar to both accounts
-    vi.spyOn((handler as any).calendarRegistry, 'resolveCalendarsToAccounts').mockResolvedValue({
-      resolved: new Map([
-        ['work', ['primary']],
-        ['personal', ['primary']]
-      ]),
-      warnings: []
-    });
-  });
-
-  const setupCalendarMocks = (workEvents: any[], personalEvents: any[]) => {
-    const workCalendar = {
-      events: {
-        list: vi.fn().mockResolvedValue({
-          data: { items: workEvents }
-        })
-      }
-    };
-    const personalCalendar = {
-      events: {
-        list: vi.fn().mockResolvedValue({
-          data: { items: personalEvents }
-        })
-      }
-    };
-
-    vi.spyOn(handler as any, 'getCalendar').mockImplementation((client: OAuth2Client) => {
-      if (client === workClient) return workCalendar;
-      return personalCalendar;
-    });
-  };
-
-  it('merges and annotates events from multiple accounts', async () => {
-    setupCalendarMocks(
-      [
-        {
-          id: 'work-1',
-          summary: 'Work Planning',
-          start: { dateTime: '2025-03-01T09:00:00Z' },
-          end: { dateTime: '2025-03-01T10:00:00Z' }
-        }
-      ],
-      [
-        {
-          id: 'personal-1',
-          summary: 'Dentist',
-          start: { dateTime: '2025-03-01T08:00:00Z' },
-          end: { dateTime: '2025-03-01T08:30:00Z' }
-        }
-      ]
-    );
-
-    const result = await handler.runTool({
-      account: ['work', 'personal'],
-      calendarId: 'primary',
-      timeMin: '2025-03-01T00:00:00Z',
-      timeMax: '2025-03-02T00:00:00Z'
-    }, accounts);
-
-    const parsed = JSON.parse(result.content[0].text);
-    expect(parsed.accounts).toEqual(['work', 'personal']);
-    expect(parsed.events).toHaveLength(2);
-    expect(parsed.events[0].accountId).toBe('personal');
-    expect(parsed.events[1].accountId).toBe('work');
-    expect(parsed.note).toContain('merged events');
-  });
-
-  it('includes warnings when an account fails to load events', async () => {
-    const workCalendar = {
-      events: {
-        list: vi.fn().mockResolvedValue({
-          data: {
-            items: [
-              {
-                id: 'work-1',
-                summary: '1:1',
-                start: { dateTime: '2025-03-02T15:00:00Z' },
-                end: { dateTime: '2025-03-02T15:30:00Z' }
-              }
-            ]
-          }
-        })
-      }
-    };
-    const personalCalendar = {
-      events: {
-        list: vi.fn().mockRejectedValue(new Error('API failure'))
-      }
-    };
-
-    vi.spyOn(handler as any, 'getCalendar').mockImplementation((client: OAuth2Client) => {
-      if (client === workClient) return workCalendar;
-      return personalCalendar;
+  describe('Fractional seconds provider bounds (byte-for-byte)', () => {
+    beforeEach(() => {
+      mockCalendar.events.list.mockResolvedValue({ data: { items: [] } });
     });
 
-    const result = await handler.runTool({
-      account: ['work', 'personal'],
-      calendarId: 'primary',
-      timeMin: '2025-03-02T00:00:00Z',
-      timeMax: '2025-03-03T00:00:00Z'
-    }, accounts);
+    it('should forward explicit-offset fractional bounds to events.list unchanged', async () => {
+      const timeMin = '2026-01-01T00:00:00.123456789+09:00';
+      const timeMax = '2026-01-31T23:59:59.999999999Z';
+      await handler.runTool({ calendarId: 'primary', timeMin, timeMax }, mockAccounts);
+      const callArgs = mockCalendar.events.list.mock.calls[0][0];
+      expect(callArgs.timeMin).toBe(timeMin);
+      expect(callArgs.timeMax).toBe(timeMax);
+    });
 
-    const parsed = JSON.parse(result.content[0].text);
-    expect(parsed.totalCount).toBe(1);
-    expect(parsed.warnings).toBeDefined();
-    expect(parsed.partialFailures).toHaveLength(1);
-    expect(parsed.partialFailures[0].accountId).toBe('personal');
+    it('should forward .1 fractional Z bounds without truncation', async () => {
+      const timeMin = '2026-01-01T00:00:00.1Z';
+      const timeMax = '2026-01-31T23:59:59.1Z';
+      await handler.runTool({ calendarId: 'primary', timeMin, timeMax }, mockAccounts);
+      const callArgs = mockCalendar.events.list.mock.calls[0][0];
+      expect(callArgs.timeMin).toBe(timeMin);
+      expect(callArgs.timeMax).toBe(timeMax);
+    });
+
+    it('should preserve naive fraction digits through UTC fallback conversion', async () => {
+      await handler.runTool({
+        calendarId: 'primary',
+        timeMin: '2026-01-01T00:00:00.123456',
+        timeMax: '2026-01-31T23:59:59.999999999',
+      }, mockAccounts);
+      const callArgs = mockCalendar.events.list.mock.calls[0][0];
+      expect(callArgs.timeMin).toBe('2026-01-01T00:00:00.123456Z');
+      expect(callArgs.timeMax).toBe('2026-01-31T23:59:59.999999999Z');
+    });
   });
 });

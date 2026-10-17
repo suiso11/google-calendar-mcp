@@ -113,7 +113,7 @@ OAuth credentials not found. Please provide credentials using one of these metho
 
 Token storage:
 - Tokens are saved to: ${getSecureTokenPath()}
-- To use a custom token location, set GOOGLE_CALENDAR_MCP_TOKEN_PATH environment variable
+- To use a custom token location, set GOOGLE_CALENDAR_MCP_READONLY_TOKEN_PATH environment variable
 
 To get OAuth credentials:
 1. Go to the Google Cloud Console (https://console.cloud.google.com/)
