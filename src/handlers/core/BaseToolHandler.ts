@@ -62,8 +62,8 @@ export abstract class BaseToolHandler<TArgs = any> {
             return client;
         }
 
-        // No account specified - use first available (sorted for consistency)
-        const sortedAccountIds = Array.from(accounts.keys()).sort();
+        // No account specified - use first available (code-unit sorted, locale-independent, for consistency)
+        const sortedAccountIds = Array.from(accounts.keys()).sort((a, b) => Number(a > b) - Number(a < b));
         const firstAccountId = sortedAccountIds[0];
         const client = accounts.get(firstAccountId);
         if (!client) {

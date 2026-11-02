@@ -89,7 +89,7 @@ export class CalendarRegistry {
    * Uses in-flight request tracking to prevent duplicate API calls during concurrent access.
    */
   async getUnifiedCalendars(accounts: Map<string, OAuth2Client>): Promise<UnifiedCalendar[]> {
-    const cacheKey = Array.from(accounts.keys()).sort().join(',');
+    const cacheKey = Array.from(accounts.keys()).sort((a, b) => Number(a > b) - Number(a < b)).join(',');
 
     // Check if there's already an in-flight request for this cache key
     const inFlight = this.inFlightRequests.get(cacheKey);
